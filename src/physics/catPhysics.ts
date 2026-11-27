@@ -184,8 +184,8 @@ export class CatPhysics {
       spineBend: 0,
       walkPhase: 0,
       walkAmp: 0,
-      pupilDilation: 0.35,
-      eyeSquint: 0.25,
+      pupilDilation: 0.68,
+      eyeSquint: 0.72,
       pawReach: 0,
       headYaw: 0,
       groomHeadShift: { x: 0, y: 0 },
@@ -758,22 +758,26 @@ export class CatPhysics {
     this.spineBendVel += ((targetSpineBend - st.spineBend) * 42 - this.spineBendVel * 8.2) * clampedDt;
     st.spineBend = Math.max(-0.58, Math.min(0.58, st.spineBend + this.spineBendVel * clampedDt));
 
-    // Dynamic Eye Expressions: natural blink, happy squint ("眯眯眼") when petted, HUGE dilated pupils when chasing laser!
+    // Dynamic Eye Expressions:
+    // - Resting / being petted: cozy sleepy half-lidded / happy closed eyes (zero uncanny stare!)
+    // - Chasing laser dot: wakes up wide with big round adorable dark hunter pupils!
     this.blinkTimer -= clampedDt;
     if (this.blinkTimer <= 0 && !isChasing) {
-      this.blinkDur = 0.17;
-      this.blinkTimer = 3.2 + Math.random() * 3.6;
+      this.blinkDur = 0.20;
+      this.blinkTimer = 3.5 + Math.random() * 4.0;
     }
     if (this.blinkDur > 0) this.blinkDur = Math.max(0, this.blinkDur - clampedDt);
-    const blinkVal = this.blinkDur > 0 ? Math.sin((this.blinkDur / 0.17) * Math.PI) : 0;
+    const blinkVal = this.blinkDur > 0 ? Math.sin((this.blinkDur / 0.20) * Math.PI) : 0;
 
-    const targetDilation = isChasing ? 0.96 : st.annoyance > 0.35 ? 0.72 : 0.34;
+    const targetDilation = isChasing ? 0.94 : 0.68;
     st.pupilDilation += (targetDilation - st.pupilDilation) * Math.min(1, clampedDt * 7.0);
 
+    // Cozy relaxed sleepy expression by default (0.68), closes gently to happy crescent when petted (0.96),
+    // and opens wide & cute (0.08) when chasing the laser pointer!
     const targetSquint = isChasing
-      ? 0.0
-      : Math.max(blinkVal, this.isSelfGrooming ? 0.82 : st.contentment * 0.85 + 0.14);
-    st.eyeSquint += (targetSquint - st.eyeSquint) * Math.min(1, clampedDt * 12.0);
+      ? 0.08
+      : Math.max(blinkVal, this.isSelfGrooming ? 0.94 : 0.66 + st.contentment * 0.32);
+    st.eyeSquint += (targetSquint - st.eyeSquint) * Math.min(1, clampedDt * 10.0);
 
     const effPaw = Math.max(targetPawReach, Math.max(0, st.pounceOffset * 18.0));
     st.pawReach += (effPaw - st.pawReach) * Math.min(1, clampedDt * 10.0);

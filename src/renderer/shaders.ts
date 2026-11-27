@@ -938,89 +938,118 @@ void main() {
       sceneCol = sceneCol * (1.0 - accumAlpha) + accumCol;
     }
 
-    // 3.5) Cute Realistic Top-Down Feline Face (Expressive Eyes, Dilating Pupils, Button Nose & Whiskers!)
+    // 3.5) Soft, Cute & Natural Top-Down Feline Face (Recessed Socket Eyes, Tiny Velvety Nose & Ultra-Fine Whiskers!)
     if (gHere.headMask > 0.02 || length(gHere.headLocal) < 0.18) {
       vec2 hp = gHere.headLocal;
-      // Rotate world light slightly into head frame for realistic glossy eye catchlight
-      float faceMask = smoothstep(0.02, -0.025, gHere.sdf);
+      float faceMask = smoothstep(0.015, -0.028, gHere.sdf);
 
-      // A) Expressive Almond Cat Eyes (squint into happy slits when petted; huge dilated pupils when chasing laser!)
+      // Muted, natural organic iris hues (never neon yellow!)
       vec3 irisCol = (uPatternType == 5 || uPatternType == 6)
-        ? vec3(0.46, 0.72, 0.94)  // Sapphire blue for Siamese & Ragdoll
+        ? vec3(0.45, 0.64, 0.82)  // Soft dusty sky-blue for Siamese & Ragdoll
         : (uPatternType == 0 || uPatternType == 1 || uPatternType == 2 || uPatternType == 4)
-        ? vec3(0.84, 0.64, 0.22)  // Warm amber-gold for Black / Orange / Calico / Tortie
-        : vec3(0.48, 0.74, 0.44); // Soft emerald-green for White / Silver / Grey / Sphynx
+        ? vec3(0.68, 0.52, 0.24)  // Warm honey-hazel for Black / Orange / Calico / Tortie
+        : vec3(0.46, 0.62, 0.42); // Soft sage-green for White / Silver / Grey / Sphynx
 
+      // A) Recessed Soft Cat Eyes (peaceful curved sleeping lashes when relaxed; cute big round dark eyes when chasing laser!)
       for (int side = -1; side <= 1; side += 2) {
         float sy = float(side);
-        vec2 eyeCenter = vec2(-0.072, sy * 0.038);
-        vec2 ep = rot2d(hp - eyeCenter, -sy * 0.28);
-        // Squint flattens eye opening vertically into adorable crescent/slit
-        float openX = mix(0.017, 0.0038, uEyeSquint);
-        float openY = 0.022;
-        float eyeDist = length(vec2(ep.x / openX, ep.y / openY));
+        // Positioned softly forward on the muzzle curve (not high up on the forehead!)
+        vec2 eyeCenter = vec2(-0.082, sy * 0.036);
+        vec2 ep = rot2d(hp - eyeCenter, -sy * 0.22);
 
-        // Soft dark lash / eyelid rim framing the eye naturally against fur
-        float lidMask = smoothstep(1.32, 0.96, eyeDist) * faceMask;
-        vec3 lidCol = applyAtmosphere(vec3(0.09, 0.07, 0.07), bgBeam * 0.4, bgRain);
-        sceneCol = mix(sceneCol, lidCol, lidMask * (0.48 + 0.34 * uEyeSquint));
+        // Soft recessed eye-socket ambient shadow so eyes sit naturally INSIDE the fur!
+        float socketAO = exp(-dot(ep / vec2(0.022, 0.026), ep / vec2(0.022, 0.026))) * faceMask;
+        sceneCol *= 1.0 - socketAO * 0.26;
 
-        if (uEyeSquint < 0.88 && eyeDist < 1.0) {
-          float eyeCov = smoothstep(1.0, 0.72, eyeDist) * (1.0 - smoothstep(0.76, 0.92, uEyeSquint)) * faceMask;
-          // Subtle iris depth gradient
-          float irisGrad = 0.72 + 0.38 * smoothstep(0.95, 0.2, eyeDist);
-          vec3 eyeCol = irisCol * irisGrad;
+        // Happy curved sleeping/squinting eyelid crease ("弯弯眯眯眼")
+        float lidCurve = ep.x - (ep.y * ep.y * 9.0 - 0.002);
+        float closedArc = smoothstep(0.0038, 0.0008, abs(lidCurve)) * smoothstep(0.020, 0.006, abs(ep.y)) * faceMask;
 
-          // Dynamic pupil: vertical feline slit when relaxed -> huge dark hunter circle when chasing laser!
-          float pW = mix(0.28, 0.74, uPupilDilation);
-          float pH = mix(0.76, 0.80, uPupilDilation);
-          float pupilDist = length(vec2(ep.x / (openX * pW), ep.y / (openY * pH)));
-          float pupilCov = smoothstep(1.0, 0.72, pupilDist);
-          eyeCol = mix(eyeCol, vec3(0.03, 0.03, 0.04), pupilCov);
+        if (uEyeSquint > 0.62) {
+          // Peaceful sleeping / happily purring curved eyelid line!
+          float sleepBlend = smoothstep(0.62, 0.80, uEyeSquint);
+          vec3 lashCol = applyAtmosphere(vec3(0.11, 0.09, 0.08), bgBeam * 0.35, bgRain);
+          sceneCol = mix(sceneCol, lashCol, closedArc * 0.62 * sleepBlend);
+        }
 
-          // Crisp sunlit window catchlight glint makes the cat's eyes look genuinely ALIVE!
-          float glint1 = exp(-dot((ep - vec2(-openX * 0.28, -openY * 0.24)) / vec2(0.0045, 0.0055), (ep - vec2(-openX * 0.28, -openY * 0.24)) / vec2(0.0045, 0.0055)));
-          float glint2 = exp(-dot((ep - vec2(openX * 0.25, openY * 0.26)) / vec2(0.0025, 0.003), (ep - vec2(openX * 0.25, openY * 0.26)) / vec2(0.0025, 0.003))) * 0.45;
-          eyeCol = applyAtmosphere(eyeCol, bgBeam * 0.5, bgRain) + vec3(0.95, 0.97, 1.0) * (glint1 * 0.92 + glint2);
+        if (uEyeSquint < 0.78) {
+          float openFactor = 1.0 - smoothstep(0.50, 0.78, uEyeSquint);
+          float openX = mix(0.0155, 0.0055, uEyeSquint);
+          float openY = 0.0195;
+          float eyeDist = length(vec2(ep.x / openX, ep.y / openY));
 
-          sceneCol = mix(sceneCol, eyeCol, eyeCov);
+          // Delicate dark eyelid rim (subtle, feathered by surrounding fur — no thick black sticker!)
+          float rimMask = smoothstep(1.18, 0.88, eyeDist) * openFactor * faceMask;
+          vec3 rimCol = applyAtmosphere(vec3(0.10, 0.08, 0.08), bgBeam * 0.35, bgRain);
+          sceneCol = mix(sceneCol, rimCol, rimMask * 0.42);
+
+          if (eyeDist < 1.0) {
+            float eyeCov = smoothstep(1.0, 0.68, eyeDist) * openFactor * faceMask;
+
+            // Soft deep iris with natural outer limbal ring darkening
+            float limbal = smoothstep(0.55, 1.0, eyeDist);
+            vec3 eyeCol = irisCol * (0.95 - limbal * 0.45);
+
+            // Big cute round dark pupil (gentle & adorable, NEVER scary narrow snake slit!)
+            float pW = mix(0.58, 0.78, uPupilDilation);
+            float pH = mix(0.66, 0.80, uPupilDilation);
+            float pupilDist = length(vec2(ep.x / (openX * pW), ep.y / (openY * pH)));
+            float pupilCov = smoothstep(1.0, 0.68, pupilDist);
+            eyeCol = mix(eyeCol, vec3(0.035, 0.032, 0.042), pupilCov);
+
+            // Upper brow-ridge shadow across back/top of eye (+X side in head-local coords!) for 3D depth!
+            float browShadow = smoothstep(-0.004, 0.013, ep.x);
+            eyeCol *= 1.0 - browShadow * 0.52;
+
+            // Tiny crisp window catchlight (small & delicate so eyes look soft and glossy!)
+            vec2 g1 = (ep - vec2(-openX * 0.20, -openY * 0.22)) / vec2(0.0036, 0.0040);
+            float glint1 = exp(-dot(g1, g1));
+            vec2 g2 = (ep - vec2(openX * 0.22, openY * 0.24)) / vec2(0.0020, 0.0022);
+            float glint2 = exp(-dot(g2, g2)) * 0.35;
+            eyeCol = applyAtmosphere(eyeCol, bgBeam * 0.45, bgRain) + vec3(0.96, 0.97, 1.0) * (glint1 * 0.82 + glint2);
+
+            sceneCol = mix(sceneCol, eyeCol, eyeCov);
+          }
         }
       }
 
-      // B) Cute Tiny Glossy Button Nose at Muzzle Tip!
-      vec2 np = hp - vec2(-0.107, 0.002);
-      // Soft rounded triangular feline nose leather
-      float noseSdf = length(vec2((np.x + 0.002) / 0.010, np.y / (0.013 - np.x * 0.25))) - 1.0;
-      float noseCov = smoothstep(0.18, -0.18, noseSdf) * faceMask;
+      // B) Tiny Delicate Matte-Velvet Cat Nose tucked right at the very front edge of the muzzle!
+      vec2 np = hp - vec2(-0.114, 0.001);
+      // Small delicate inverted-triangle feline nose tip (half the previous size — no clown ball!)
+      float noseW = max(0.003, 0.0072 - (np.x + 0.005) * 0.45);
+      float noseSdf = length(vec2(np.x / 0.0055, np.y / noseW)) - 1.0;
+      float noseCov = smoothstep(0.22, -0.22, noseSdf) * faceMask;
       if (noseCov > 0.005) {
         float isDarkNose = (uPatternType == 0 && dot(uPrimaryColor, vec3(1.0)) < 0.5) || uPatternType == 5 ? 1.0 : 0.0;
-        vec3 noseBase = mix(vec3(0.76, 0.46, 0.47), vec3(0.13, 0.11, 0.12), isDarkNose);
-        float noseHighlight = exp(-dot((np - vec2(-0.003, -0.003)) / vec2(0.0045, 0.005), (np - vec2(-0.003, -0.003)) / vec2(0.0045, 0.005))) * 0.45;
-        vec3 noseCol = applyAtmosphere(noseBase, bgBeam * 0.5, bgRain) + vec3(0.95, 0.92, 0.90) * noseHighlight;
-        sceneCol = mix(sceneCol, noseCol, noseCov * 0.92);
+        vec3 noseBase = mix(vec3(0.72, 0.48, 0.48), vec3(0.14, 0.12, 0.13), isDarkNose);
+        // Subtle nose leather shading (soft matte velvet, NOT shiny bubble!)
+        float noseShade = 0.78 + 0.26 * smoothstep(0.004, -0.004, np.x);
+        float noseGlint = exp(-dot((np - vec2(-0.0015, -0.0015)) / vec2(0.0028, 0.0032), (np - vec2(-0.0015, -0.0015)) / vec2(0.0028, 0.0032))) * 0.16;
+        vec3 noseCol = applyAtmosphere(noseBase * noseShade, bgBeam * 0.45, bgRain) + vec3(0.95, 0.90, 0.88) * noseGlint;
+        sceneCol = mix(sceneCol, noseCol, noseCov * 0.86);
       }
 
-      // C) Delicate Curved Whiskers Fanning Out from Both Cheeks!
+      // C) Ultra-Fine Translucent Whiskers Fanning Outward from Muzzle Pads (NEVER crossing eyes/ears!)
       float whiskerAlpha = 0.0;
       for (int side = -1; side <= 1; side += 2) {
         float sy = float(side);
-        vec2 wp = hp - vec2(-0.095, sy * 0.026);
-        wp.y *= sy; // Mirror cleanly for left & right cheeks
-        if (wp.y > 0.0 && wp.y < 0.145 && wp.x > -0.08 && wp.x < 0.09) {
+        vec2 wp = hp - vec2(-0.106, sy * 0.018);
+        wp.y *= sy;
+        if (wp.y > 0.005 && wp.y < 0.125 && wp.x > -0.05 && wp.x < 0.05) {
           for (int w = 0; w < 3; w++) {
             float fw = float(w) - 1.0; // -1, 0, +1
-            // Graceful gentle backward curve along each whisker
-            float curveX = fw * 0.016 + wp.y * (0.14 + fw * 0.20) + wp.y * wp.y * 1.15;
+            // Fan gently OUTWARD from muzzle (slight graceful sweep, staying well in front of the eyes!)
+            float curveX = fw * 0.007 + wp.y * (-0.06 + fw * 0.14) + wp.y * wp.y * 0.45;
             float distW = abs(wp.x - curveX);
-            float taper = smoothstep(0.135 - abs(fw) * 0.018, 0.008, wp.y) * smoothstep(0.004, 0.018, wp.y);
-            float line = smoothstep(0.0024, 0.0005, distW) * taper;
+            float taper = smoothstep(0.118 - abs(fw) * 0.016, 0.012, wp.y) * smoothstep(0.006, 0.022, wp.y);
+            float line = smoothstep(0.0014, 0.0003, distW) * taper;
             whiskerAlpha = max(whiskerAlpha, line);
           }
         }
       }
       if (whiskerAlpha > 0.01) {
-        vec3 whiskCol = applyAtmosphere(vec3(0.96, 0.94, 0.90), bgBeam * 0.65, bgRain);
-        sceneCol = mix(sceneCol, whiskCol, whiskerAlpha * 0.62);
+        vec3 whiskCol = applyAtmosphere(vec3(0.96, 0.94, 0.90), bgBeam * 0.60, bgRain);
+        sceneCol = mix(sceneCol, whiskCol, whiskerAlpha * 0.36);
       }
     }
   }
