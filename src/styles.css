@@ -839,6 +839,36 @@ html[data-theme='dark'] .breed-swatch[aria-pressed='true']:not([data-locked='tru
   padding-top: 2px;
 }
 
+.popover-sep {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0;
+}
+
+.voice-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+}
+
+.voice-chip {
+  height: 26px;
+  padding: 0 4px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.voice-chip[aria-pressed='true'] {
+  background: var(--ring);
+  color: var(--bg);
+  border-color: transparent;
+  font-weight: 500;
+}
+
 .text-btn {
   background: none;
   border: none;

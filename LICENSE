@@ -25,6 +25,10 @@ Asset Licensing Notice:
 - Image assets in `public/assets/` (`cushion-bg.webp`, `petting-hand.webp`)
   are original assets created for this project and released under CC0 1.0 Universal
   (Public Domain Dedication).
-- Audio asset `public/assets/cat-purr.mp3` is transcoded from the Public Domain
-  domestic cat purring recording "Whiskers' purr edit.ogg" by Adam Cuerden
-  (Wikimedia Commons, Public Domain).
+- Audio assets in `public/assets/`:
+  * `cat-purr-warm.mp3`: from "Whiskers' purr edit.ogg" by Adam Cuerden
+    (Wikimedia Commons, Public Domain).
+  * `cat-purr-deep.mp3`: from "Felis silvestris catus purrs.ogg" by Tobias Puderer
+    (Wikimedia Commons, CC BY-SA 3.0).
+  * `cat-purr-soft.mp3`: from "Cat purring.ogg" by Peter Hull
+    (Wikimedia Commons, CC BY-SA 4.0).

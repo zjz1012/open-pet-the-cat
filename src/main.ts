@@ -1,6 +1,6 @@
 import './styles.css';
 import { CAT_BREEDS, type CatBreed } from './breeds';
-import { PurrEngine } from './audio/purrEngine';
+import { PurrEngine, type PurrVoiceId, type PurrVoicePreference } from './audio/purrEngine';
 import {
   NATURAL_COAT_SWATCHES,
   PATTERN_OPTIONS,
@@ -65,6 +65,9 @@ function initApp(): void {
   const widthInput = document.getElementById('cat-width') as HTMLInputElement;
   const sizeOut = document.getElementById('cat-size-out') as HTMLOutputElement;
   const widthOut = document.getElementById('cat-width-out') as HTMLOutputElement;
+  const purrVolInput = document.getElementById('purr-volume') as HTMLInputElement;
+  const purrVolOut = document.getElementById('purr-volume-out') as HTMLOutputElement;
+  const purrVoiceBtns = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-voice]'));
   const resetPropBtn = document.getElementById('reset-proportions') as HTMLButtonElement;
 
   const toolButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-tool]'));
@@ -121,6 +124,19 @@ function initApp(): void {
   let currentBreed: CatBreed = defaultBreed;
   let atmosphere: AtmosphereMode = 'day';
   let currentTool: ToolMode = 'hand';
+  let purrVoicePref: PurrVoicePreference = 'auto';
+
+  function resolveBreedPurrVoice(breed: CatBreed): PurrVoiceId {
+    if (purrVoicePref !== 'auto') return purrVoicePref;
+    if (breed.purrHz <= 24.4) return 'deep'; // Big floofs, Orange Tabby, Blue Grey, Ragdoll, Siberian, Norwegian
+    if (breed.purrHz >= 26.2) return 'soft'; // White, Calico, Siamese, Sphynx
+    return 'warm'; // Classic warm domestic purr (Black, Silver/Brown Tabby, Bicolor, Tortie)
+  }
+
+  function syncPurrVoice(): void {
+    purr.setBreedPurrHz(currentBreed.purrHz);
+    purr.setPurrVoice(resolveBreedPurrVoice(currentBreed));
+  }
 
   // Follow-Lock state (locked by default until verified via toy.getAuthorRelation!)
   let followUnlocked = false;
@@ -422,7 +438,7 @@ function initApp(): void {
   function applyProfileAsCustom(): void {
     activePresetId = null;
     currentBreed = breedFromProfile(profile);
-    purr.setBreedPurrHz(currentBreed.purrHz);
+    syncPurrVoice();
     physics.setTemperament(profile.temperament);
     for (const [, btn] of swatchButtons) {
       btn.setAttribute('aria-pressed', 'false');
@@ -439,7 +455,7 @@ function initApp(): void {
       Number(widthInput.value),
       profile.temperament,
     );
-    purr.setBreedPurrHz(breed.purrHz);
+    syncPurrVoice();
     physics.setTemperament(profile.temperament);
     for (const [id, btn] of swatchButtons) {
       btn.setAttribute('aria-pressed', id === breed.id ? 'true' : 'false');
@@ -682,10 +698,49 @@ function initApp(): void {
 
   sizeInput.addEventListener('input', syncProportions);
   widthInput.addEventListener('input', syncProportions);
+
+  purrVolInput.addEventListener('input', () => {
+    const pct = Number(purrVolInput.value);
+    purrVolOut.textContent = `${pct}%`;
+    purr.setVolume(pct / 100);
+  });
+
+  for (const btn of purrVoiceBtns) {
+    btn.addEventListener('click', () => {
+      const v = btn.dataset.voice as PurrVoicePreference | undefined;
+      if (!v) return;
+      purrVoicePref = v;
+      for (const b of purrVoiceBtns) {
+        b.setAttribute('aria-pressed', b.dataset.voice === v ? 'true' : 'false');
+      }
+      syncPurrVoice();
+      if (!purr.isEnabled()) {
+        void purr.setEnabled(true).then(() => {
+          soundBtn.setAttribute('aria-checked', 'true');
+        });
+      }
+      const names: Record<PurrVoicePreference, string> = {
+        auto: '随猫咪品种自动匹配呼噜声',
+        warm: '温润贴耳呼噜声',
+        deep: '低沉大猫呼噜声',
+        soft: '轻柔晚安呼噜声',
+      };
+      showToast(`已切换：${names[v]}`, 1500);
+    });
+  }
+
   resetPropBtn.addEventListener('click', () => {
     sizeInput.value = '5';
     widthInput.value = '5';
+    purrVolInput.value = '40';
+    purrVolOut.textContent = '40%';
+    purr.setVolume(0.40);
+    purrVoicePref = 'auto';
+    for (const b of purrVoiceBtns) {
+      b.setAttribute('aria-pressed', b.dataset.voice === 'auto' ? 'true' : 'false');
+    }
     syncProportions();
+    syncPurrVoice();
   });
 
   document.addEventListener('pointerdown', (e) => {

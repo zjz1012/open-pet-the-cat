@@ -1,24 +1,39 @@
+export type PurrVoiceId = 'warm' | 'deep' | 'soft';
+export type PurrVoicePreference = 'auto' | PurrVoiceId;
+
+const PURR_VOICE_URLS: Record<PurrVoiceId, string> = {
+  warm: './assets/cat-purr-warm.mp3',
+  deep: './assets/cat-purr-deep.mp3',
+  soft: './assets/cat-purr-soft.mp3',
+};
+
 /**
- * Real-Sampled Cat Purring + Procedural Ambience Engine (v2.3)
+ * Multi-Voice Real-Sampled Cat Purring + Ambience Engine (v2.4)
  *
- * - Primary purr: Real Public Domain domestic cat purring recording (`public/assets/cat-purr.mp3`),
- *   decoded via Web Audio API with sample-accurate PCM crossfade looping (zero MP3 gap/click!),
- *   dynamic breed pitch scaling (`playbackRate`), and petting-responsive volume & warmth filter.
- * - Ambience & tactile SFX: Rainy Afternoon window rainwash, soft bongo butt-pat thump,
- *   raspy ASMR self-grooming lick, and brief warning hiss.
+ * Includes 3 distinct real cat purring recordings:
+ *  - `warm`: Cozy close-mic domestic cat purr (Public Domain)
+ *  - `deep`: Deep resonant big-cat rumble (CC BY-SA 3.0)
+ *  - `soft`: Ultra-gentle sleepy whisper purr (CC BY-SA 4.0)
+ *
+ * Features gentle default volume (~40%), smooth crossfading when switching voices/breeds,
+ * and sample-accurate PCM crossfade looping (zero MP3 gap/click).
  */
 export class PurrEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
-  private purrGain: GainNode | null = null;
+  private purrBusGain: GainNode | null = null;
   private purrFilter: BiquadFilterNode | null = null;
-  private purrSource: AudioBufferSourceNode | null = null;
-  private purrBuffer: AudioBuffer | null = null;
-  private purrLoadPromise: Promise<void> | null = null;
   private rainGain: GainNode | null = null;
+
+  private readonly voiceBuffers = new Map<PurrVoiceId, AudioBuffer>();
+  private readonly voiceLoading = new Map<PurrVoiceId, Promise<void>>();
+  private activeVoiceId: PurrVoiceId = 'warm';
+  private activeSource: AudioBufferSourceNode | null = null;
+  private activeVoiceGain: GainNode | null = null;
 
   private enabled = false;
   private initialized = false;
+  private userVolume = 0.40; // Gentle, comfortable default volume (0..1)
   private baseHz = 25.0;
 
   private targetIntensity = 0;
@@ -35,11 +50,32 @@ export class PurrEngine {
     return this.enabled;
   }
 
+  public getVolume(): number {
+    return this.userVolume;
+  }
+
+  public setVolume(vol: number): void {
+    this.userVolume = Math.max(0, Math.min(1, vol));
+    if (this.ctx && this.masterGain && this.enabled) {
+      // Soft perceptual volume curve (max 0.65 so even 100% stays warm & never harsh)
+      const gain = Math.pow(this.userVolume, 1.35) * 0.65;
+      this.masterGain.gain.setTargetAtTime(gain, this.ctx.currentTime, 0.08);
+    }
+  }
+
+  public setPurrVoice(voice: PurrVoiceId): void {
+    if (this.activeVoiceId === voice && this.activeSource) return;
+    this.activeVoiceId = voice;
+    if (this.initialized && this.enabled) {
+      void this.activateVoice(voice);
+    }
+  }
+
   public setBreedPurrHz(hz: number): void {
     this.baseHz = hz;
-    if (this.ctx && this.purrSource) {
-      const rate = Math.max(0.84, Math.min(1.16, hz / 25.0));
-      this.purrSource.playbackRate.setTargetAtTime(rate, this.ctx.currentTime, 0.25);
+    if (this.ctx && this.activeSource) {
+      const rate = Math.max(0.88, Math.min(1.12, hz / 25.0));
+      this.activeSource.playbackRate.setTargetAtTime(rate, this.ctx.currentTime, 0.25);
     }
   }
 
@@ -54,12 +90,13 @@ export class PurrEngine {
       if (this.ctx && this.ctx.state === 'suspended') {
         await this.ctx.resume().catch(() => {});
       }
-      void this.ensurePurrSampleLoaded();
+      void this.activateVoice(this.activeVoiceId);
     }
     if (this.ctx && this.masterGain) {
       const now = this.ctx.currentTime;
       this.masterGain.gain.cancelScheduledValues(now);
-      this.masterGain.gain.setTargetAtTime(next ? 0.92 : 0.0, now, 0.20);
+      const target = next ? Math.pow(this.userVolume, 1.35) * 0.65 : 0.0;
+      this.masterGain.gain.setTargetAtTime(target, now, 0.22);
     }
   }
 
@@ -69,7 +106,7 @@ export class PurrEngine {
     if (this.ctx && this.ctx.state === 'suspended') {
       void this.ctx.resume().catch(() => {});
     }
-    void this.ensurePurrSampleLoaded();
+    void this.activateVoice(this.activeVoiceId);
   }
 
   private ensureInitialized(): void {
@@ -86,17 +123,17 @@ export class PurrEngine {
     masterGain.gain.value = 0;
     masterGain.connect(ctx.destination);
 
-    // ----- 1) Real Cat Purr Sample Bus -----
+    // ----- 1) Real Multi-Voice Cat Purr Bus -----
     const purrFilter = ctx.createBiquadFilter();
     purrFilter.type = 'lowpass';
-    purrFilter.frequency.value = 900;
-    purrFilter.Q.value = 0.6;
+    purrFilter.frequency.value = 850;
+    purrFilter.Q.value = 0.55;
 
-    const purrGain = ctx.createGain();
-    purrGain.gain.value = 0;
+    const purrBusGain = ctx.createGain();
+    purrBusGain.gain.value = 0;
 
-    purrFilter.connect(purrGain);
-    purrGain.connect(masterGain);
+    purrFilter.connect(purrBusGain);
+    purrBusGain.connect(masterGain);
 
     // ----- 2) Rainy Afternoon Window ASMR Bus -----
     const pinkBuffer = this.createNoiseBuffer(ctx, 4.0, 'pink');
@@ -123,47 +160,85 @@ export class PurrEngine {
     rainSource.start();
 
     this.masterGain = masterGain;
-    this.purrGain = purrGain;
+    this.purrBusGain = purrBusGain;
     this.purrFilter = purrFilter;
     this.rainGain = rainGain;
     this.initialized = true;
   }
 
-  /**
-   * Fetches and decodes `public/assets/cat-purr.mp3`, then trims MP3 priming padding
-   * and builds a 100% seamless PCM crossfaded loop buffer so there is ZERO loop click!
-   */
-  private async ensurePurrSampleLoaded(): Promise<void> {
-    if (this.purrBuffer || !this.ctx) {
-      if (this.purrBuffer && !this.purrSource) this.startPurrLoop();
-      return;
+  private async loadVoiceBuffer(voice: PurrVoiceId): Promise<AudioBuffer | null> {
+    if (this.voiceBuffers.has(voice)) return this.voiceBuffers.get(voice)!;
+    if (!this.ctx) return null;
+
+    let pending = this.voiceLoading.get(voice);
+    if (!pending) {
+      pending = (async () => {
+        try {
+          const resp = await fetch(PURR_VOICE_URLS[voice]);
+          if (!resp.ok || !this.ctx) return;
+          const arrayBuf = await resp.arrayBuffer();
+          if (!this.ctx) return;
+          const raw = await this.ctx.decodeAudioData(arrayBuf);
+          this.voiceBuffers.set(voice, this.buildSeamlessLoopBuffer(this.ctx, raw));
+        } catch (err) {
+          console.warn(`Failed to load purr voice "${voice}":`, err);
+        }
+      })();
+      this.voiceLoading.set(voice, pending);
     }
-    if (this.purrLoadPromise) return this.purrLoadPromise;
+    await pending;
+    return this.voiceBuffers.get(voice) ?? null;
+  }
 
-    this.purrLoadPromise = (async () => {
-      try {
-        const resp = await fetch('./assets/cat-purr.mp3');
-        if (!resp.ok) return;
-        const arrayBuf = await resp.arrayBuffer();
-        if (!this.ctx) return;
-        const raw = await this.ctx.decodeAudioData(arrayBuf);
-        this.purrBuffer = this.buildSeamlessLoopBuffer(this.ctx, raw);
-        this.startPurrLoop();
-      } catch (err) {
-        console.warn('Failed to load real cat purr audio sample:', err);
-      }
-    })();
+  private async activateVoice(voice: PurrVoiceId): Promise<void> {
+    const buffer = await this.loadVoiceBuffer(voice);
+    if (!buffer || !this.ctx || !this.purrFilter) return;
+    // If user switched to another voice while this one was loading, skip starting stale voice
+    if (this.activeVoiceId !== voice) return;
 
-    return this.purrLoadPromise;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+
+    // Smoothly fade out previous voice source (zero click!)
+    const prevSource = this.activeSource;
+    const prevGain = this.activeVoiceGain;
+    if (prevSource && prevGain) {
+      prevGain.gain.cancelScheduledValues(now);
+      prevGain.gain.setValueAtTime(prevGain.gain.value, now);
+      prevGain.gain.linearRampToValueAtTime(0, now + 0.38);
+      window.setTimeout(() => {
+        try {
+          prevSource.stop();
+          prevSource.disconnect();
+          prevGain.disconnect();
+        } catch {
+          // ignore
+        }
+      }, 450);
+    }
+
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    src.playbackRate.value = Math.max(0.88, Math.min(1.12, this.baseHz / 25.0));
+
+    const vGain = ctx.createGain();
+    vGain.gain.setValueAtTime(0.0001, now);
+    vGain.gain.linearRampToValueAtTime(1.0, now + 0.38);
+
+    src.connect(vGain);
+    vGain.connect(this.purrFilter);
+    src.start(0);
+
+    this.activeSource = src;
+    this.activeVoiceGain = vGain;
   }
 
   private buildSeamlessLoopBuffer(ctx: AudioContext, raw: AudioBuffer): AudioBuffer {
     const sr = raw.sampleRate;
-    // Trim 0.20s off start & end to remove any MP3 priming silence
     const trimStart = Math.min(Math.floor(sr * 0.20), Math.floor(raw.length * 0.1));
     const trimEnd = Math.min(Math.floor(sr * 0.20), Math.floor(raw.length * 0.1));
     const usableLen = Math.max(Math.floor(sr * 1.5), raw.length - trimStart - trimEnd);
-    // Overlap 0.65s tail seamlessly onto head using equal-power sine/cosine crossfade
     const fadeLen = Math.min(Math.floor(sr * 0.65), Math.floor(usableLen * 0.25));
     const outLen = usableLen - fadeLen;
 
@@ -174,27 +249,14 @@ export class PurrEngine {
       for (let i = 0; i < outLen; i++) {
         dst[i] = src[trimStart + i];
       }
-      // Crossfade the trimmed tail into the beginning of `dst`
       for (let i = 0; i < fadeLen; i++) {
         const t = i / fadeLen;
         const fadeIn = Math.sin(t * Math.PI * 0.5);
         const fadeOut = Math.cos(t * Math.PI * 0.5);
-        const tailSample = src[trimStart + outLen + i];
-        dst[i] = dst[i] * fadeIn + tailSample * fadeOut;
+        dst[i] = dst[i] * fadeIn + src[trimStart + outLen + i] * fadeOut;
       }
     }
     return out;
-  }
-
-  private startPurrLoop(): void {
-    if (!this.ctx || !this.purrBuffer || !this.purrFilter || this.purrSource) return;
-    const src = this.ctx.createBufferSource();
-    src.buffer = this.purrBuffer;
-    src.loop = true;
-    src.playbackRate.value = Math.max(0.84, Math.min(1.16, this.baseHz / 25.0));
-    src.connect(this.purrFilter);
-    src.start(0);
-    this.purrSource = src;
   }
 
   private createNoiseBuffer(ctx: AudioContext, seconds: number, kind: 'pink' | 'white'): AudioBuffer {
@@ -245,7 +307,7 @@ export class PurrEngine {
 
     const thumpGain = ctx.createGain();
     thumpGain.gain.setValueAtTime(0.001, now);
-    thumpGain.gain.linearRampToValueAtTime(0.32, now + 0.009);
+    thumpGain.gain.linearRampToValueAtTime(0.28, now + 0.009);
     thumpGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
 
     const lp = ctx.createBiquadFilter();
@@ -260,12 +322,10 @@ export class PurrEngine {
     osc.stop(now + 0.14);
   }
 
-  /** Kept as a no-op hook so pure real purring stays natural without robotic synth meows */
   public playSoftMeow(): void {
-    // Intentionally silent — real cat purr swell conveys contentment naturally
+    // Kept silent — real purr swell conveys contentment naturally
   }
 
-  /** Brief feline warning hiss when annoyed by rough against-grain rubbing */
   public playHiss(): void {
     if (!this.enabled || !this.initialized || !this.ctx || !this.masterGain) return;
     if (this.ctx.state !== 'running') return;
@@ -274,30 +334,29 @@ export class PurrEngine {
     this.lastHissTime = now;
 
     const ctx = this.ctx;
-    const buf = this.createNoiseBuffer(ctx, 0.36, 'white');
+    const buf = this.createNoiseBuffer(ctx, 0.34, 'white');
     const src = ctx.createBufferSource();
     src.buffer = buf;
 
     const bp = ctx.createBiquadFilter();
     bp.type = 'bandpass';
-    bp.frequency.setValueAtTime(3200, now);
-    bp.frequency.exponentialRampToValueAtTime(1950, now + 0.32);
+    bp.frequency.setValueAtTime(3100, now);
+    bp.frequency.exponentialRampToValueAtTime(1900, now + 0.30);
     bp.Q.value = 1.6;
 
     const env = ctx.createGain();
     env.gain.setValueAtTime(0.001, now);
-    env.gain.linearRampToValueAtTime(0.12, now + 0.03);
-    env.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+    env.gain.linearRampToValueAtTime(0.11, now + 0.03);
+    env.gain.exponentialRampToValueAtTime(0.001, now + 0.30);
 
     src.connect(bp);
     bp.connect(env);
     env.connect(this.masterGain);
 
     src.start(now);
-    src.stop(now + 0.34);
+    src.stop(now + 0.32);
   }
 
-  /** Soft raspy ASMR cat-tongue licking sound while self-grooming ruffled fur */
   public playLickSound(): void {
     if (!this.enabled || !this.initialized || !this.ctx || !this.masterGain) return;
     if (this.ctx.state !== 'running') return;
@@ -313,13 +372,13 @@ export class PurrEngine {
     const bp = ctx.createBiquadFilter();
     bp.type = 'bandpass';
     bp.frequency.setValueAtTime(1450, now);
-    bp.frequency.exponentialRampToValueAtTime(2450, now + 0.11);
+    bp.frequency.exponentialRampToValueAtTime(2400, now + 0.11);
     bp.frequency.exponentialRampToValueAtTime(1550, now + 0.19);
     bp.Q.value = 1.9;
 
     const env = ctx.createGain();
     env.gain.setValueAtTime(0.0001, now);
-    env.gain.linearRampToValueAtTime(0.09, now + 0.045);
+    env.gain.linearRampToValueAtTime(0.085, now + 0.045);
     env.gain.exponentialRampToValueAtTime(0.0001, now + 0.20);
 
     src.connect(bp);
@@ -360,23 +419,22 @@ export class PurrEngine {
     isHeadZone: number,
     annoyance = 0,
   ): void {
-    // Irritated cat temporarily stops purring!
     const calmFactor = Math.max(0, 1 - annoyance * 1.5);
-    // Gentle cozy idle purr (0.20) when sound is on; blooms warmly up to 1.0 when petted!
-    this.targetIntensity = (0.20 + contentment * 0.80) * calmFactor;
+    // Gentle cozy idle purr (0.28) rising smoothly to rich lap-cat purr (1.0) while petting
+    this.targetIntensity = (0.28 + contentment * 0.72) * calmFactor;
     const smoothRate = this.targetIntensity > this.currentIntensity ? 2.6 : 1.0;
     this.currentIntensity += (this.targetIntensity - this.currentIntensity) * Math.min(1, dt * smoothRate);
     this.currentSpeed += (strokeSpeed - this.currentSpeed) * Math.min(1, dt * 5.0);
 
     this.currentRainLevel += (this.targetRainLevel - this.currentRainLevel) * Math.min(1, dt * 2.2);
 
-    if (!this.initialized || !this.enabled || !this.ctx || !this.purrGain) return;
+    if (!this.initialized || !this.enabled || !this.ctx || !this.purrBusGain) return;
     if (this.ctx.state !== 'running') return;
 
     const now = this.ctx.currentTime;
 
     if (this.rainGain) {
-      this.rainGain.gain.setTargetAtTime(this.currentRainLevel * 0.26, now, 0.12);
+      this.rainGain.gain.setTargetAtTime(this.currentRainLevel * 0.34, now, 0.12);
       if (this.currentRainLevel > 0.2) {
         this.dropletTimer -= dt;
         if (this.dropletTimer <= 0) {
@@ -386,24 +444,23 @@ export class PurrEngine {
       }
     }
 
-    // Real recorded cat purr volume & warmth envelope
-    const purrLevel = this.currentIntensity * (0.90 + this.currentSpeed * 0.18);
-    this.purrGain.gain.setTargetAtTime(purrLevel, now, 0.08);
+    const purrLevel = this.currentIntensity * (0.85 + this.currentSpeed * 0.16);
+    this.purrBusGain.gain.setTargetAtTime(purrLevel, now, 0.08);
 
-    // Subtle tonal warmth: deeper muffled rumble when idling, rich clear purr when actively petting!
     if (this.purrFilter) {
-      const targetCutoff = 560 + this.currentIntensity * 2400 - isHeadZone * 180;
+      const targetCutoff = 540 + this.currentIntensity * 2200 - isHeadZone * 160;
       this.purrFilter.frequency.setTargetAtTime(targetCutoff, now, 0.14);
     }
   }
 
   public dispose(): void {
     try {
-      this.purrSource?.stop();
+      this.activeSource?.stop();
     } catch {
       // ignore
     }
-    this.purrSource = null;
+    this.activeSource = null;
+    this.activeVoiceGain = null;
     if (this.ctx) {
       void this.ctx.close();
       this.ctx = null;
