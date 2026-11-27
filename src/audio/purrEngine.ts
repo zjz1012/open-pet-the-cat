@@ -31,13 +31,13 @@ export class PurrEngine {
   private activeSource: AudioBufferSourceNode | null = null;
   private activeVoiceGain: GainNode | null = null;
 
-  private enabled = false;
+  private enabled = true; // Audio enabled by default once user activates the game
   private initialized = false;
   private userVolume = 0.40; // Gentle, comfortable default volume (0..1)
   private baseHz = 25.0;
 
-  private targetIntensity = 0;
-  private currentIntensity = 0;
+  private targetIntensity = 0.14;
+  private currentIntensity = 0.14;
   private currentSpeed = 0;
 
   private targetRainLevel = 0;
@@ -106,7 +106,13 @@ export class PurrEngine {
     if (this.ctx && this.ctx.state === 'suspended') {
       void this.ctx.resume().catch(() => {});
     }
-    void this.activateVoice(this.activeVoiceId);
+    if (this.ctx && this.masterGain) {
+      const target = Math.pow(this.userVolume, 1.35) * 0.65;
+      this.masterGain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.18);
+    }
+    if (!this.activeSource) {
+      void this.activateVoice(this.activeVoiceId);
+    }
   }
 
   private ensureInitialized(): void {
@@ -412,17 +418,56 @@ export class PurrEngine {
     osc.stop(now + 0.06);
   }
 
+  /** Crisp, tactile instant-camera Polaroid shutter click */
+  public playShutterSound(): void {
+    if (!this.enabled || !this.initialized || !this.ctx || !this.masterGain) return;
+    if (this.ctx.state !== 'running') return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+
+    // Two-stage mechanical click (shutter open + close)
+    const buf = this.createNoiseBuffer(ctx, 0.09, 'white');
+    for (const [offset, freq, amp] of [
+      [0.0, 2600, 0.22],
+      [0.042, 1850, 0.16],
+    ] as const) {
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = freq;
+      bp.Q.value = 1.4;
+
+      const env = ctx.createGain();
+      env.gain.setValueAtTime(0.0001, now + offset);
+      env.gain.linearRampToValueAtTime(amp, now + offset + 0.004);
+      env.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.036);
+
+      src.connect(bp);
+      bp.connect(env);
+      env.connect(this.masterGain);
+      src.start(now + offset);
+      src.stop(now + offset + 0.045);
+    }
+  }
+
   public update(
     dt: number,
     contentment: number,
     strokeSpeed: number,
     isHeadZone: number,
     annoyance = 0,
+    isActivelyPetting = false,
   ): void {
     const calmFactor = Math.max(0, 1 - annoyance * 1.5);
-    // Gentle cozy idle purr (0.28) rising smoothly to rich lap-cat purr (1.0) while petting
-    this.targetIntensity = (0.28 + contentment * 0.72) * calmFactor;
-    const smoothRate = this.targetIntensity > this.currentIntensity ? 2.6 : 1.0;
+    // Clear yet gentle contrast:
+    // - Untouched: gradually fades down to a very soft distant murmur (~0.12)
+    // - Actively petting: rises warmly and stays noticeably more present (~0.58 -> 0.88), never harsh!
+    const touchTarget = isActivelyPetting
+      ? 0.56 + contentment * 0.30 + Math.min(0.08, strokeSpeed * 0.08)
+      : 0.12 + contentment * 0.16;
+    this.targetIntensity = touchTarget * calmFactor;
+    const smoothRate = this.targetIntensity > this.currentIntensity ? 2.4 : 0.48;
     this.currentIntensity += (this.targetIntensity - this.currentIntensity) * Math.min(1, dt * smoothRate);
     this.currentSpeed += (strokeSpeed - this.currentSpeed) * Math.min(1, dt * 5.0);
 
@@ -444,12 +489,13 @@ export class PurrEngine {
       }
     }
 
-    const purrLevel = this.currentIntensity * (0.85 + this.currentSpeed * 0.16);
-    this.purrBusGain.gain.setTargetAtTime(purrLevel, now, 0.08);
+    const purrLevel = this.currentIntensity * (0.86 + this.currentSpeed * 0.10);
+    this.purrBusGain.gain.setTargetAtTime(purrLevel, now, 0.09);
 
     if (this.purrFilter) {
-      const targetCutoff = 540 + this.currentIntensity * 2200 - isHeadZone * 160;
-      this.purrFilter.frequency.setTargetAtTime(targetCutoff, now, 0.14);
+      // Slightly warmer muffled tone when untouched, opens gently when petting
+      const targetCutoff = 420 + this.currentIntensity * 2100 - isHeadZone * 140;
+      this.purrFilter.frequency.setTargetAtTime(targetCutoff, now, 0.16);
     }
   }
 

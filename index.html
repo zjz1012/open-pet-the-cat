@@ -293,6 +293,7 @@
             </div>
 
             <div class="creator-foot">
+              <button id="creator-save" class="secondary-btn" type="button" title="保存当前猫咪到云存档">云存档</button>
               <button id="creator-share" class="primary-btn" type="button">生成分享链接</button>
               <button id="creator-photo" class="secondary-btn" type="button">拍立得</button>
             </div>
@@ -373,6 +374,7 @@
                 </div>
 
                 <div class="popover-foot">
+                  <button id="cloud-save-btn" class="text-btn text-btn-accent" type="button">保存猫咪云存档 ☁️</button>
                   <button id="reset-proportions" class="text-btn" type="button">恢复默认</button>
                 </div>
               </div>
@@ -383,9 +385,9 @@
               class="ctrl-btn"
               type="button"
               role="switch"
-              aria-checked="false"
+              aria-checked="true"
               aria-label="呼噜声与雨声白噪音开关"
-              title="呼噜声 / 雨声 ASMR"
+              title="呼噜声 / 雨声 ASMR（默认开启）"
             >
               <svg class="icon icon-sound-off" viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -467,7 +469,7 @@
         </div>
 
         <footer class="footer">
-          <span id="breed-caption" class="breed-caption">三花猫 · Calico</span>
+          <span id="breed-caption" class="breed-caption">橘猫 · Orange Tabby</span>
           <span class="sep" aria-hidden="true">·</span>
           <span class="hint">
             轻点拍屁股 · 逆毛会炸毛 · <kbd>1-3</kbd> 换道具 · <kbd>C</kbd> 捏猫工坊 · <kbd>Space</kbd> 自动撸 · <kbd>T</kbd> 晴/雨/夜
@@ -476,7 +478,47 @@
       </section>
     </main>
 
-    <!-- Follow-Author Unlock Modal (Bilibili Toy SDK getAuthorRelation) -->
+    <!-- Polaroid Camera Viewfinder Modal -->
+    <div id="polaroid-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="polaroid-modal-title" hidden>
+      <div class="modal-card polaroid-card">
+        <button id="polaroid-close-btn" class="modal-close" type="button" aria-label="关闭取景框">×</button>
+
+        <div class="polaroid-head">
+          <h2 id="polaroid-modal-title" class="modal-title">拍立得取景框 📸</h2>
+          <span class="polaroid-sub">实时预览 · 选一款可爱相纸定格小猫</span>
+        </div>
+
+        <div class="polaroid-viewport">
+          <canvas id="polaroid-preview" class="polaroid-preview-canvas" aria-label="拍立得实时取景预览"></canvas>
+          <div id="polaroid-flash" class="polaroid-flash" aria-hidden="true"></div>
+        </div>
+
+        <div class="polaroid-controls">
+          <div class="polaroid-row">
+            <label class="polaroid-label" for="polaroid-caption-input">照片配文</label>
+            <input
+              id="polaroid-caption-input"
+              class="text-input polaroid-input"
+              type="text"
+              maxlength="14"
+              placeholder="给这张合照起个小标题~"
+            />
+          </div>
+
+          <div class="polaroid-row">
+            <span class="polaroid-label">可爱相纸</span>
+            <div id="polaroid-styles" class="polaroid-style-row" role="group" aria-label="选择拍立得风格"></div>
+          </div>
+        </div>
+
+        <div class="modal-actions polaroid-actions">
+          <button id="polaroid-shutter-btn" class="primary-btn shutter-btn" type="button">拍摄并保存 📸</button>
+          <button id="polaroid-cancel-btn" class="secondary-btn modal-btn" type="button">返回撸猫</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Follow-Author Unlock Modal (Bilibili Toy SDK getAuthorRelation + Author Self Check) -->
     <div id="follow-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="follow-modal-title" hidden>
       <div class="modal-card">
         <button id="follow-close-btn" class="modal-close" type="button" aria-label="关闭弹窗">×</button>
@@ -485,23 +527,27 @@
           <img id="follow-author-avatar" class="author-avatar" alt="UP主头像" hidden />
           <div id="follow-author-placeholder" class="author-avatar author-placeholder" aria-hidden="true">🐱</div>
           <div>
-            <h2 id="follow-modal-title" class="modal-title">关注 UP 主免费解锁</h2>
-            <p id="follow-modal-sub" class="modal-sub">关注作者即可解锁全部稀有猫种与特色玩法</p>
+            <h2 id="follow-modal-title" class="modal-title">关注「知喵~」免费解锁</h2>
+            <p id="follow-modal-sub" class="modal-sub">关注作者主页即可解锁全部猫咪品种与特色玩法</p>
           </div>
         </div>
 
         <ul class="perk-list">
-          <li><strong>4 只稀有猫种</strong>：布偶猫、西伯利亚猫、挪威森林猫、斯芬克斯猫</li>
+          <li><strong>11 只精选猫种</strong>：三花、白猫、银虎斑、奶牛、蓝猫、狸花、暹罗、布偶、西伯利亚、挪威森林猫等</li>
           <li><strong>木质排梳 &amp; 红点激光笔</strong>：顺毛留梳痕掉毛球、360° 转圈追红点</li>
-          <li><strong>基因捏猫工坊 &amp; 雨天 ASMR</strong>：定制专属小猫与窗外细雨白噪音</li>
+          <li><strong>基因捏猫工坊 &amp; 雨天 ASMR</strong>：定制专属小猫、云存档同步与窗外细雨白噪音</li>
         </ul>
 
         <p id="follow-status-hint" class="modal-hint"></p>
 
         <div class="modal-actions">
-          <button id="follow-go-btn" class="primary-btn modal-btn" type="button">去关注 UP 主</button>
-          <button id="follow-verify-btn" class="secondary-btn modal-btn" type="button">我已关注，刷新解锁</button>
+          <button id="follow-go-btn" class="primary-btn modal-btn" type="button">去关注「知喵~」</button>
+          <button id="follow-verify-btn" class="secondary-btn modal-btn" type="button">我已关注，验证解锁</button>
         </div>
+
+        <button id="follow-owner-btn" class="owner-verify-btn" type="button">
+          我是作者本人（知喵~）· 点击验证解锁
+        </button>
 
         <!-- Shown ONLY in standalone non-Bilibili local/demo preview; strictly hidden in Bilibili Toy runtime -->
         <button id="follow-demo-btn" class="demo-unlock-btn" type="button" hidden>

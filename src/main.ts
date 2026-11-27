@@ -4,21 +4,30 @@ import { PurrEngine, type PurrVoiceId, type PurrVoicePreference } from './audio/
 import {
   NATURAL_COAT_SWATCHES,
   PATTERN_OPTIONS,
+  POLAROID_STYLE_OPTIONS,
   TEMPERAMENT_OPTIONS,
   breedFromProfile,
   decodeSharedCatState,
-  downloadDataUrl,
+  drawPolaroidToCanvas,
   encodeSharedCatHash,
   encodeSharedCatToken,
   generateRandomCatProfile,
   profileFromBreed,
   renderPolaroidDataUrl,
+  saveDataUrlInBrowser,
   type AtmosphereMode,
   type CustomCatProfile,
+  type PolaroidStyleId,
 } from './creator/catCreator';
 import { CatPhysics, type ToolMode } from './physics/catPhysics';
 import { CatRenderer } from './renderer/CatRenderer';
-import { ToyBridge, type AuthorInfo, type ToyContainerState } from './sdk/toySdk';
+import {
+  AUTHOR_SELF_NICKNAME,
+  AUTHOR_SPACE_MID,
+  ToyBridge,
+  type AuthorInfo,
+  type ToyContainerState,
+} from './sdk/toySdk';
 
 const SIZE_STEPS = [0.65, 0.72, 0.79, 0.86, 0.93, 1.0, 1.03, 1.06, 1.09, 1.11, 1.14];
 const WIDTH_STEPS = [0.80, 0.84, 0.88, 0.92, 0.96, 1.0, 1.08, 1.16, 1.24, 1.32, 1.40];
@@ -29,8 +38,9 @@ const ATMOSPHERE_LABEL: Record<AtmosphereMode, string> = {
   night: '月光',
 };
 
-/** Special rare longhair/hairless breeds & advanced toys that unlock after following the author */
-const FOLLOW_LOCKED_BREEDS = new Set(['ragdoll', 'siberian', 'norwegian', 'sphynx']);
+/** Only Black (kuro) and Orange Tabby (mugi) are free by default; all other breeds unlock after following! */
+const FREE_BREEDS = new Set(['kuro', 'mugi']);
+const FOLLOW_LOCKED_BREEDS = new Set(CAT_BREEDS.filter((b) => !FREE_BREEDS.has(b.id)).map((b) => b.id));
 const LOCAL_DEMO_UNLOCK_KEY = 'open_pet_the_cat_local_demo_unlocked';
 
 function furLengthLabel(val: number): string {
@@ -68,6 +78,7 @@ function initApp(): void {
   const purrVolInput = document.getElementById('purr-volume') as HTMLInputElement;
   const purrVolOut = document.getElementById('purr-volume-out') as HTMLOutputElement;
   const purrVoiceBtns = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-voice]'));
+  const cloudSaveBtn = document.getElementById('cloud-save-btn') as HTMLButtonElement;
   const resetPropBtn = document.getElementById('reset-proportions') as HTMLButtonElement;
 
   const toolButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-tool]'));
@@ -97,8 +108,19 @@ function initApp(): void {
   const creatorPurrInput = document.getElementById('creator-purr') as HTMLInputElement;
   const creatorPurrOut = document.getElementById('creator-purr-out') as HTMLOutputElement;
   const creatorTempsEl = document.getElementById('creator-temperaments') as HTMLElement;
+  const creatorSaveBtn = document.getElementById('creator-save') as HTMLButtonElement;
   const creatorShareBtn = document.getElementById('creator-share') as HTMLButtonElement;
   const creatorPhotoBtn = document.getElementById('creator-photo') as HTMLButtonElement;
+
+  // Polaroid Viewfinder Modal elements
+  const polaroidModalEl = document.getElementById('polaroid-modal') as HTMLElement;
+  const polaroidCloseBtn = document.getElementById('polaroid-close-btn') as HTMLButtonElement;
+  const polaroidCancelBtn = document.getElementById('polaroid-cancel-btn') as HTMLButtonElement;
+  const polaroidPreviewCanvas = document.getElementById('polaroid-preview') as HTMLCanvasElement;
+  const polaroidFlashEl = document.getElementById('polaroid-flash') as HTMLElement;
+  const polaroidCaptionInput = document.getElementById('polaroid-caption-input') as HTMLInputElement;
+  const polaroidStylesEl = document.getElementById('polaroid-styles') as HTMLElement;
+  const polaroidShutterBtn = document.getElementById('polaroid-shutter-btn') as HTMLButtonElement;
 
   // Follow-Lock Modal elements
   const followModalEl = document.getElementById('follow-modal') as HTMLElement;
@@ -110,6 +132,7 @@ function initApp(): void {
   const followHintEl = document.getElementById('follow-status-hint') as HTMLElement;
   const followGoBtn = document.getElementById('follow-go-btn') as HTMLButtonElement;
   const followVerifyBtn = document.getElementById('follow-verify-btn') as HTMLButtonElement;
+  const followOwnerBtn = document.getElementById('follow-owner-btn') as HTMLButtonElement;
   const followDemoBtn = document.getElementById('follow-demo-btn') as HTMLButtonElement;
 
   const toastEl = document.getElementById('stage-toast') as HTMLElement;
@@ -118,13 +141,19 @@ function initApp(): void {
   const physics = new CatPhysics();
   const purr = new PurrEngine();
 
-  const defaultBreed = CAT_BREEDS.find((b) => b.id === 'hana') ?? CAT_BREEDS[0];
+  // Default to Orange Tabby (mugi) so new visitors immediately enjoy a free unlocked cat!
+  const defaultBreed = CAT_BREEDS.find((b) => b.id === 'mugi') ?? CAT_BREEDS[0];
   let activePresetId: string | null = defaultBreed.id;
   let profile: CustomCatProfile = profileFromBreed(defaultBreed);
   let currentBreed: CatBreed = defaultBreed;
   let atmosphere: AtmosphereMode = 'day';
   let currentTool: ToolMode = 'hand';
   let purrVoicePref: PurrVoicePreference = 'auto';
+  let polaroidStyle: PolaroidStyleId = 'cream';
+  let userMutedManually = false;
+  let isPolaroidOpen = false;
+  let cloudSaveDebounceTimer: number | null = null;
+  let pendingCloudState: ReturnType<typeof decodeSharedCatState> = null;
 
   function resolveBreedPurrVoice(breed: CatBreed): PurrVoiceId {
     if (purrVoicePref !== 'auto') return purrVoicePref;
@@ -182,7 +211,44 @@ function initApp(): void {
     bootRenderer();
   });
 
-  // ----- Follow-Lock UI & Bilibili SDK Verification -----
+  // ----- Cloud Save Helpers (Bilibili Toy CloudStorage + Local Mirror) -----
+  function buildSaveToken(): string {
+    return encodeSharedCatToken({
+      atmosphere,
+      presetBreedId: activePresetId,
+      profile,
+      purrVolume: Number(purrVolInput.value),
+      purrVoice: purrVoicePref,
+      polaroidStyle,
+    });
+  }
+
+  function scheduleCloudAutoSave(): void {
+    if (cloudSaveDebounceTimer !== null) {
+      window.clearTimeout(cloudSaveDebounceTimer);
+    }
+    cloudSaveDebounceTimer = window.setTimeout(() => {
+      cloudSaveDebounceTimer = null;
+      void toyBridge.saveCloudProfile(buildSaveToken(), false);
+    }, 3200);
+  }
+
+  async function saveCatToCloudNow(): Promise<void> {
+    if (cloudSaveDebounceTimer !== null) {
+      window.clearTimeout(cloudSaveDebounceTimer);
+      cloudSaveDebounceTimer = null;
+    }
+    const res = await toyBridge.saveCloudProfile(buildSaveToken(), true);
+    if (res === 'cloud') {
+      showToast(`已将「${profile.name.trim() || currentBreed.nameZh}」同步到云存档 ☁️`, 2100);
+    } else if (res === 'local') {
+      showToast(`已保存「${profile.name.trim() || currentBreed.nameZh}」到本地存档 💾`, 2000);
+    } else {
+      showToast('操作太频繁啦，稍等两秒会自动同步云存档 ☁️', 1800);
+    }
+  }
+
+  // ----- Follow-Lock UI & Bilibili SDK Verification (Author 63650 + 知喵~ Self Check) -----
   const swatchButtons = new Map<string, HTMLButtonElement>();
   const lockedFeatureEls = Array.from(document.querySelectorAll<HTMLElement>('[data-lock-feature]'));
 
@@ -203,12 +269,28 @@ function initApp(): void {
     }
   }
 
+  function completeUnlock(toastMessage: string): void {
+    const wasLocked = !followUnlocked;
+    followUnlocked = true;
+    syncLockBadges();
+    const cb = pendingUnlockAction;
+    closeFollowModal();
+    if (pendingCloudState) {
+      const saved = pendingCloudState;
+      pendingCloudState = null;
+      applyDecodedState(saved);
+    }
+    if (wasLocked) {
+      showToast(toastMessage, 2500);
+    }
+    cb?.();
+  }
+
   function openFollowModal(featureLabel: string, onUnlocked?: () => void): void {
     pendingUnlockAction = onUnlocked ?? null;
-    followTitleEl.textContent = authorInfo?.nickname
-      ? `关注「${authorInfo.nickname}」免费解锁`
-      : '关注 UP 主免费解锁';
-    followSubEl.textContent = `「${featureLabel}」为粉丝专属特色功能，关注即可立即使用`;
+    const authorName = authorInfo?.nickname || AUTHOR_SELF_NICKNAME;
+    followTitleEl.textContent = `关注「${authorName}」免费解锁`;
+    followSubEl.textContent = `「${featureLabel}」为粉丝专属内容，关注即可解锁全部猫种与道具`;
     followHintEl.textContent = '';
 
     if (authorInfo?.avatar) {
@@ -238,34 +320,45 @@ function initApp(): void {
     openFollowModal(featureLabel, action);
   }
 
+  /** Must be called inside a user gesture to verify Bilibili user nickname === "知喵~" */
+  async function tryVerifyAuthorSelf(): Promise<boolean> {
+    const user = await toyBridge.getUserProfile();
+    if (user && toyBridge.isAuthorSelfNickname(user.nickname)) {
+      completeUnlock(`欢迎回家，${AUTHOR_SELF_NICKNAME}！已自动解锁全部猫种与功能 🐾`);
+      return true;
+    }
+    return false;
+  }
+
   async function refreshFollowStatus(userTriggered = false): Promise<void> {
     const res = await toyBridge.checkAuthorFollow();
     if (res.state === 'following') {
       isStandalonePreview = false;
-      const wasLocked = !followUnlocked;
-      followUnlocked = true;
-      syncLockBadges();
-      const cb = pendingUnlockAction;
-      closeFollowModal();
-      if (wasLocked) {
-        showToast('感谢关注！已解锁全部稀有猫种与特色玩法 ✨', 2400);
-      }
-      cb?.();
+      completeUnlock('感谢关注！已解锁全部猫种与特色玩法 ✨');
       return;
     }
 
     if (res.state === 'not_following') {
       isStandalonePreview = false;
+      // On user-triggered verify, also check if the current user IS the author herself ("知喵~")!
+      if (userTriggered) {
+        const isSelf = await tryVerifyAuthorSelf();
+        if (isSelf) return;
+      }
       followUnlocked = false;
       syncLockBadges();
       if (userTriggered) {
-        followHintEl.textContent = '暂未检测到关注状态，请先关注 UP 主后再点击刷新哦~';
+        followHintEl.textContent = `暂未检测到关注「${AUTHOR_SELF_NICKNAME}」，请先前往主页关注后再点验证哦~`;
       }
       return;
     }
 
     if (res.state === 'unavailable') {
       isStandalonePreview = false;
+      if (userTriggered) {
+        const isSelf = await tryVerifyAuthorSelf();
+        if (isSelf) return;
+      }
       // Strictly follow SDK rule: never treat unavailable/unauthorized as unlocked!
       followUnlocked = false;
       syncLockBadges();
@@ -280,7 +373,7 @@ function initApp(): void {
     followUnlocked = window.localStorage.getItem(LOCAL_DEMO_UNLOCK_KEY) === '1';
     syncLockBadges();
     if (userTriggered && !followUnlocked) {
-      followHintEl.textContent = '当前为非 B站独立预览环境，可点下方「模拟已关注」体验解锁效果';
+      followHintEl.textContent = '当前为非 B站独立预览环境，已为你打开主页或可点下方「模拟已关注」体验';
     }
   }
 
@@ -291,17 +384,14 @@ function initApp(): void {
 
   followGoBtn.addEventListener('click', async () => {
     // navigate() MUST be triggered directly inside a user click gesture
-    if (authorInfo?.mid) {
-      const ok = await toyBridge.navigateToAuthorSpace(authorInfo.mid);
-      if (ok) {
-        followHintEl.textContent = '已前往 UP 主主页，关注后返回即可自动解锁~';
-        return;
-      }
-    }
-    if (isStandalonePreview) {
-      followHintEl.textContent = '请在 B站 App/Web Toy 页面中关注作者，本地预览可点下方模拟解锁';
+    const targetMid = authorInfo?.mid || AUTHOR_SPACE_MID;
+    const navRes = await toyBridge.navigateToAuthorSpace(targetMid);
+    if (navRes === 'sdk') {
+      followHintEl.textContent = `已前往「${AUTHOR_SELF_NICKNAME}」主页，关注后返回即可自动解锁~`;
+    } else if (navRes === 'web') {
+      followHintEl.textContent = `已在新标签页打开「${AUTHOR_SELF_NICKNAME}」B站主页，关注后可回来验证`;
     } else {
-      followHintEl.textContent = '请点击页面顶部作者头像关注 UP 主，关注后点「刷新解锁」即可';
+      followHintEl.textContent = `请访问 space.bilibili.com/${AUTHOR_SPACE_MID} 关注「${AUTHOR_SELF_NICKNAME}」`;
     }
   });
 
@@ -310,15 +400,22 @@ function initApp(): void {
     void refreshFollowStatus(true);
   });
 
+  followOwnerBtn.addEventListener('click', async () => {
+    if (isStandalonePreview) {
+      followHintEl.textContent = `非 B站环境无法读取 B站昵称，本地预览请点下方模拟解锁（B站内会自动识别「${AUTHOR_SELF_NICKNAME}」）`;
+      return;
+    }
+    followHintEl.textContent = `正在验证作者身份（${AUTHOR_SELF_NICKNAME}）…`;
+    const ok = await tryVerifyAuthorSelf();
+    if (!ok) {
+      followHintEl.textContent = `当前账号昵称不是「${AUTHOR_SELF_NICKNAME}」，关注主页后即可免费解锁全部内容~`;
+    }
+  });
+
   followDemoBtn.addEventListener('click', () => {
     if (!isStandalonePreview) return;
     window.localStorage.setItem(LOCAL_DEMO_UNLOCK_KEY, '1');
-    followUnlocked = true;
-    syncLockBadges();
-    const cb = pendingUnlockAction;
-    closeFollowModal();
-    showToast('本地预览：已模拟关注并解锁全部特色功能 ✨', 2200);
-    cb?.();
+    completeUnlock('本地预览：已模拟关注并解锁全部猫种与特色功能 ✨');
   });
 
   // Auto re-check follow status whenever user returns from author space page!
@@ -329,12 +426,7 @@ function initApp(): void {
       }
     } else if (document.visibilityState === 'hidden') {
       // Best-practice cloud save checkpoint on page hide
-      const token = encodeSharedCatToken({
-        atmosphere,
-        presetBreedId: activePresetId,
-        profile,
-      });
-      void toyBridge.saveCloudProfile(token);
+      void toyBridge.saveCloudProfile(buildSaveToken(), false);
     }
   });
 
@@ -435,7 +527,7 @@ function initApp(): void {
     }
   }
 
-  function applyProfileAsCustom(): void {
+  function applyProfileAsCustom(saveToCloud = true): void {
     activePresetId = null;
     currentBreed = breedFromProfile(profile);
     syncPurrVoice();
@@ -444,9 +536,10 @@ function initApp(): void {
       btn.setAttribute('aria-pressed', 'false');
     }
     updateCaption();
+    if (saveToCloud) scheduleCloudAutoSave();
   }
 
-  function selectPresetBreed(breed: CatBreed): void {
+  function selectPresetBreed(breed: CatBreed, saveToCloud = true): void {
     activePresetId = breed.id;
     currentBreed = breed;
     profile = profileFromBreed(
@@ -462,6 +555,7 @@ function initApp(): void {
     }
     syncCreatorForm();
     updateCaption();
+    if (saveToCloud) scheduleCloudAutoSave();
   }
 
   for (const breed of CAT_BREEDS) {
@@ -481,7 +575,7 @@ function initApp(): void {
 
     btn.addEventListener('click', () => {
       if (isRare) {
-        requireFollowUnlock(`稀有猫种 · ${breed.nameZh}`, () => selectPresetBreed(breed));
+        requireFollowUnlock(`猫咪品种 · ${breed.nameZh}`, () => selectPresetBreed(breed));
       } else {
         selectPresetBreed(breed);
       }
@@ -696,13 +790,20 @@ function initApp(): void {
     setPopoverOpen(propPanelEl.hidden);
   });
 
-  sizeInput.addEventListener('input', syncProportions);
-  widthInput.addEventListener('input', syncProportions);
+  sizeInput.addEventListener('input', () => {
+    syncProportions();
+    scheduleCloudAutoSave();
+  });
+  widthInput.addEventListener('input', () => {
+    syncProportions();
+    scheduleCloudAutoSave();
+  });
 
   purrVolInput.addEventListener('input', () => {
     const pct = Number(purrVolInput.value);
     purrVolOut.textContent = `${pct}%`;
     purr.setVolume(pct / 100);
+    scheduleCloudAutoSave();
   });
 
   for (const btn of purrVoiceBtns) {
@@ -714,7 +815,9 @@ function initApp(): void {
         b.setAttribute('aria-pressed', b.dataset.voice === v ? 'true' : 'false');
       }
       syncPurrVoice();
+      scheduleCloudAutoSave();
       if (!purr.isEnabled()) {
+        userMutedManually = false;
         void purr.setEnabled(true).then(() => {
           soundBtn.setAttribute('aria-checked', 'true');
         });
@@ -729,6 +832,14 @@ function initApp(): void {
     });
   }
 
+  cloudSaveBtn.addEventListener('click', () => {
+    void saveCatToCloudNow();
+  });
+
+  creatorSaveBtn.addEventListener('click', () => {
+    void saveCatToCloudNow();
+  });
+
   resetPropBtn.addEventListener('click', () => {
     sizeInput.value = '5';
     widthInput.value = '5';
@@ -741,6 +852,7 @@ function initApp(): void {
     }
     syncProportions();
     syncPurrVoice();
+    scheduleCloudAutoSave();
   });
 
   document.addEventListener('pointerdown', (e) => {
@@ -754,12 +866,13 @@ function initApp(): void {
   });
 
   // ----- Atmosphere Cycle (Day & Night free; Rainy Afternoon ASMR follow-locked!) -----
-  function setAtmosphere(mode: AtmosphereMode, announce = false): void {
+  function setAtmosphere(mode: AtmosphereMode, announce = false, saveToCloud = true): void {
     atmosphere = mode;
     document.documentElement.dataset.theme = mode === 'night' ? 'dark' : mode === 'rain' ? 'rain' : 'light';
     atmosphereLabelEl.textContent = ATMOSPHERE_LABEL[mode];
     renderer?.setAtmosphere(mode);
     purr.setRainAmbience(mode === 'rain');
+    if (saveToCloud) scheduleCloudAutoSave();
     if (announce) {
       if (mode === 'rain') {
         showToast(purr.isEnabled() ? '雨天午后 · 窗外细雨 + 呼噜白噪音' : '雨天午后 · 开启声音可听细雨 ASMR');
@@ -783,51 +896,145 @@ function initApp(): void {
     setAtmosphere(nextMode, true);
   });
 
-  // ----- Safety Check + Polaroid Snapshot (Native Bilibili Album or Web Download) + Share -----
-  async function validateCustomNameBeforeExport(): Promise<boolean> {
-    if (activePresetId) return true; // Built-in breed names don't need check
-    const check = await toyBridge.checkCatNameSafety(profile.name);
+  // ----- Safety Check + Polaroid Camera Viewfinder Studio (4 Cute Styles + Mobile/Browser Save) + Share -----
+  async function validateCustomNameBeforeExport(customText?: string): Promise<boolean> {
+    const textToCheck = (customText ?? profile.name).trim();
+    if (!textToCheck) return true;
+    const isPresetExact =
+      activePresetId &&
+      CAT_BREEDS.some((b) => b.id === activePresetId && b.nameZh === textToCheck);
+    if (isPresetExact) return true;
+
+    const check = await toyBridge.checkCatNameSafety(textToCheck);
     if (check === 'rejected') {
-      showToast('这个猫咪名字暂不可展示，换一个名字试试吧', 2400);
+      showToast('这个文字暂不可展示，换一个可爱的标题试试吧', 2400);
       return false;
     }
     if (check === 'unavailable') {
-      showToast('暂时无法校验名字安全，请稍后再试', 2200);
+      showToast('暂时无法校验文本安全，请稍后再试', 2200);
       return false;
     }
     return true;
   }
 
-  async function triggerSnapshot(): Promise<void> {
+  const polaroidStyleBtns = new Map<PolaroidStyleId, HTMLButtonElement>();
+  for (const stOpt of POLAROID_STYLE_OPTIONS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'polaroid-style-chip';
+    btn.setAttribute('aria-pressed', stOpt.id === polaroidStyle ? 'true' : 'false');
+
+    const swatch = document.createElement('span');
+    swatch.className = 'polaroid-style-swatch';
+    swatch.style.background = stOpt.swatch;
+    const label = document.createElement('span');
+    label.textContent = stOpt.label;
+
+    btn.appendChild(swatch);
+    btn.appendChild(label);
+    btn.addEventListener('click', () => {
+      polaroidStyle = stOpt.id;
+      for (const [id, b] of polaroidStyleBtns) {
+        b.setAttribute('aria-pressed', id === polaroidStyle ? 'true' : 'false');
+      }
+      renderLivePolaroidPreview();
+      scheduleCloudAutoSave();
+    });
+
+    polaroidStyleBtns.set(stOpt.id, btn);
+    polaroidStylesEl.appendChild(btn);
+  }
+
+  function syncPolaroidStyleUi(): void {
+    for (const [id, b] of polaroidStyleBtns) {
+      b.setAttribute('aria-pressed', id === polaroidStyle ? 'true' : 'false');
+    }
+  }
+
+  function getPolaroidCaption(): { title: string; subtitle: string } {
+    const typed = polaroidCaptionInput.value.trim();
+    const title = typed || profile.name.trim() || currentBreed.nameZh;
+    const patLabel = PATTERN_OPTIONS.find((p) => p.value === profile.pattern)?.label ?? currentBreed.nameEn;
+    return { title, subtitle: `${patLabel} · 撸猫留念` };
+  }
+
+  function renderLivePolaroidPreview(): void {
+    if (!isPolaroidOpen || !renderer) return;
+    const { title, subtitle } = getPolaroidCaption();
+    drawPolaroidToCanvas(polaroidPreviewCanvas, canvasEl, {
+      catName: title,
+      subtitle,
+      atmosphere,
+      style: polaroidStyle,
+      photoWidth: 520,
+      showViewfinderGuides: true,
+    });
+  }
+
+  function openPolaroidViewfinder(): void {
+    setPopoverOpen(false);
+    setCreatorOpen(false);
+    polaroidCaptionInput.value = profile.name.trim() || currentBreed.nameZh;
+    syncPolaroidStyleUi();
+    isPolaroidOpen = true;
+    polaroidModalEl.hidden = false;
+    renderer?.render(0.016, physics.state, currentBreed);
+    renderLivePolaroidPreview();
+  }
+
+  function closePolaroidViewfinder(): void {
+    isPolaroidOpen = false;
+    polaroidModalEl.hidden = true;
+  }
+
+  polaroidCaptionInput.addEventListener('input', renderLivePolaroidPreview);
+  polaroidCloseBtn.addEventListener('click', closePolaroidViewfinder);
+  polaroidCancelBtn.addEventListener('click', closePolaroidViewfinder);
+  polaroidModalEl.addEventListener('pointerdown', (e) => {
+    if (e.target === polaroidModalEl) closePolaroidViewfinder();
+  });
+
+  async function captureAndSavePolaroid(): Promise<void> {
     if (!renderer) return;
-    if (!(await validateCustomNameBeforeExport())) return;
+    const { title, subtitle } = getPolaroidCaption();
+    if (!(await validateCustomNameBeforeExport(title))) return;
+
+    // Tactile camera shutter sound + bright flash!
+    purr.playShutterSound();
+    polaroidFlashEl.classList.add('active');
+    window.setTimeout(() => polaroidFlashEl.classList.remove('active'), 80);
 
     renderer.render(0.016, physics.state, currentBreed);
-    const title = profile.name.trim() || currentBreed.nameZh;
-    const patLabel = PATTERN_OPTIONS.find((p) => p.value === profile.pattern)?.label ?? currentBreed.nameEn;
-    const dataUrl = renderPolaroidDataUrl(canvasEl, title, `${patLabel} · Open Pet the Cat`, atmosphere);
+    const dataUrl = renderPolaroidDataUrl(canvasEl, title, subtitle, atmosphere, polaroidStyle);
     if (!dataUrl) return;
 
     const saveRes = await toyBridge.saveImage(dataUrl);
     if (saveRes === 'saved_album') {
-      showToast(`「${title}」拍立得已保存到手机相册 📸`);
+      showToast(`「${title}」拍立得已保存到手机相册 📸`, 2300);
+      closePolaroidViewfinder();
     } else if (saveRes === 'fallback') {
-      downloadDataUrl(dataUrl, `pet-the-cat-${Date.now()}.jpg`);
-      showToast(`「${title}」拍立得合照已保存 📸`);
+      const webRes = await saveDataUrlInBrowser(dataUrl, `pet-the-cat-${polaroidStyle}-${Date.now()}.jpg`);
+      showToast(
+        webRes === 'shared'
+          ? `「${title}」拍立得已调起系统保存/分享 📸`
+          : `「${title}」拍立得已下载保存 📸`,
+        2300,
+      );
+      closePolaroidViewfinder();
     } else {
       showToast('保存相册未完成，请检查相册权限后重试');
     }
   }
 
+  polaroidShutterBtn.addEventListener('click', () => {
+    void captureAndSavePolaroid();
+  });
+
   async function triggerShare(): Promise<void> {
     if (!(await validateCustomNameBeforeExport())) return;
 
-    const token = encodeSharedCatToken({
-      atmosphere,
-      presetBreedId: activePresetId,
-      profile,
-    });
-    void toyBridge.saveCloudProfile(token);
+    const token = buildSaveToken();
+    void toyBridge.saveCloudProfile(token, true);
 
     // Inside Bilibili App: use native toy.share with relative Toy path (index.html?cat=...)
     const sharedNative = await toyBridge.shareToyPath(`index.html?cat=${token}`);
@@ -850,10 +1057,10 @@ function initApp(): void {
 
   snapshotBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    void triggerSnapshot();
+    openPolaroidViewfinder();
   });
   creatorPhotoBtn.addEventListener('click', () => {
-    void triggerSnapshot();
+    openPolaroidViewfinder();
   });
 
   shareBtn.addEventListener('click', (e) => {
@@ -864,9 +1071,23 @@ function initApp(): void {
     void triggerShare();
   });
 
-  // ----- Sound Toggle -----
+  // ----- Default Audio Enabled on Game Activation + Manual Sound Toggle -----
+  soundBtn.setAttribute('aria-checked', purr.isEnabled() ? 'true' : 'false');
+
+  function activateAudioOnGesture(): void {
+    if (!userMutedManually && purr.isEnabled()) {
+      purr.unlock();
+    }
+  }
+  window.addEventListener('pointerdown', activateAudioOnGesture, { capture: true, passive: true });
+  window.addEventListener('touchstart', activateAudioOnGesture, { capture: true, passive: true });
+  window.addEventListener('keydown', activateAudioOnGesture, { capture: true, passive: true });
+  // Also attempt immediate unlock in environments that permit autoplay
+  purr.unlock();
+
   soundBtn.addEventListener('click', async () => {
     const next = !purr.isEnabled();
+    userMutedManually = !next;
     await purr.setEnabled(next);
     soundBtn.setAttribute('aria-checked', next ? 'true' : 'false');
     if (next && atmosphere === 'rain') {
@@ -1002,43 +1223,71 @@ function initApp(): void {
     } else if (e.key === '3') {
       requireFollowUnlock('红点激光笔', () => selectTool('laser', true));
     } else if (e.key === 'Escape') {
+      if (isPolaroidOpen) closePolaroidViewfinder();
       if (!followModalEl.hidden) closeFollowModal();
       if (!propPanelEl.hidden) setPopoverOpen(false);
       if (!creatorPanelEl.hidden) setCreatorOpen(false);
     }
   });
 
-  // ----- Restore Shared Cat from Query (?cat=...) or Hash (#cat=...) -----
-  function applyDecodedState(shared: NonNullable<ReturnType<typeof decodeSharedCatState>>, announce: boolean): void {
+  // ----- Restore Shared / Cloud-Saved Cat State -----
+  function applyDecodedState(
+    shared: NonNullable<ReturnType<typeof decodeSharedCatState>>,
+    announceLabel?: string,
+  ): void {
     profile = shared.profile;
     sizeInput.value = String(profile.sizeIdx);
     widthInput.value = String(profile.widthIdx);
-    setAtmosphere(shared.atmosphere, false);
+
+    if (typeof shared.purrVolume === 'number') {
+      purrVolInput.value = String(shared.purrVolume);
+      purrVolOut.textContent = `${shared.purrVolume}%`;
+      purr.setVolume(shared.purrVolume / 100);
+    }
+    if (shared.purrVoice) {
+      purrVoicePref = shared.purrVoice;
+      for (const b of purrVoiceBtns) {
+        b.setAttribute('aria-pressed', b.dataset.voice === purrVoicePref ? 'true' : 'false');
+      }
+    }
+    if (shared.polaroidStyle) {
+      polaroidStyle = shared.polaroidStyle;
+      syncPolaroidStyleUi();
+    }
+
+    const effAtmos = shared.atmosphere === 'rain' && !followUnlocked ? 'day' : shared.atmosphere;
+    setAtmosphere(effAtmos, false, false);
+
     if (shared.presetBreedId) {
       const matched = CAT_BREEDS.find((b) => b.id === shared.presetBreedId);
       if (matched) {
         activePresetId = matched.id;
         currentBreed = matched;
+        for (const [id, btn] of swatchButtons) {
+          btn.setAttribute('aria-pressed', id === matched.id ? 'true' : 'false');
+        }
+        syncPurrVoice();
+        physics.setTemperament(profile.temperament);
       } else {
-        applyProfileAsCustom();
+        applyProfileAsCustom(false);
       }
     } else {
-      applyProfileAsCustom();
+      applyProfileAsCustom(false);
     }
     syncProportions();
     syncCreatorForm();
     updateCaption();
-    if (announce) {
-      showToast(`已载入分享小猫「${profile.name}」🐱`, 2200);
+    if (announceLabel) {
+      showToast(announceLabel, 2200);
     }
   }
 
   const sharedFromUrl =
     decodeSharedCatState(window.location.search) ?? decodeSharedCatState(window.location.hash);
   if (sharedFromUrl) {
-    applyDecodedState(sharedFromUrl, true);
+    applyDecodedState(sharedFromUrl, `已载入分享小猫「${sharedFromUrl.profile.name}」🐱`);
   } else {
-    selectPresetBreed(defaultBreed);
+    selectPresetBreed(defaultBreed, false);
     syncProportions();
   }
 
@@ -1051,16 +1300,30 @@ function initApp(): void {
     authorInfo = await toyBridge.getAuthorProfile();
     await refreshFollowStatus(false);
 
-    // Restore cloud-saved cat if no explicit shared URL was opened
+    // Automatically load cloud-saved (or local-backup) cat config on startup!
     if (!sharedFromUrl) {
-      const cloudToken = await toyBridge.loadCloudProfile();
-      if (cloudToken) {
-        const cloudState = decodeSharedCatState(cloudToken);
-        if (cloudState) applyDecodedState(cloudState, false);
+      const cloudLoaded = await toyBridge.loadCloudProfile();
+      if (cloudLoaded) {
+        const cloudState = decodeSharedCatState(cloudLoaded.token);
+        if (cloudState) {
+          const needsUnlock =
+            !followUnlocked &&
+            ((cloudState.presetBreedId && FOLLOW_LOCKED_BREEDS.has(cloudState.presetBreedId)) ||
+              !cloudState.presetBreedId);
+          if (needsUnlock) {
+            // Remember cloud cat and restore it right after user verifies follow / author identity
+            pendingCloudState = cloudState;
+          } else {
+            const catTitle = cloudState.profile.name || '小猫';
+            const srcTag = cloudLoaded.source === 'cloud' ? '云存档 ☁️' : '上次存档 💾';
+            applyDecodedState(cloudState, `已自动加载${srcTag}「${catTitle}」`);
+          }
+        }
       }
     }
 
     await toyBridge.onPageClose(() => {
+      void toyBridge.saveCloudProfile(buildSaveToken(), false);
       purr.dispose();
     });
   })();
@@ -1073,6 +1336,7 @@ function initApp(): void {
   // ----- Main 60fps Loop -----
   let lastTs = performance.now();
   let lastFurballCount = 0;
+  let lastPolaroidFrameTs = 0;
 
   function frame(ts: number): void {
     const dt = Math.min(0.05, Math.max(0.001, (ts - lastTs) / 1000));
@@ -1088,10 +1352,10 @@ function initApp(): void {
       }
       if (events.hissPushback) {
         purr.playHiss();
-        showToast('逆毛搓太狠炸毛啦！顺着毛轻轻摸~ 😾', 1800);
+        showToast('逆毛搓太狠炸毛啦！小猫气呼呼甩尾巴~ 😾', 1800);
       }
       if (events.startedSelfGroom) {
-        showToast('毛被梳炸啦，小猫正在自己低头舔毛理顺… 👅', 2400);
+        showToast('甩完尾巴消气啦，小猫正在自己低头舔毛理顺… 👅', 2400);
       }
       if (events.lickStroke) {
         purr.playLickSound();
@@ -1113,8 +1377,15 @@ function initApp(): void {
         physics.state.strokeSpeed,
         physics.state.isHeadZone,
         physics.state.annoyance,
+        physics.state.isActivelyPetting,
       );
       renderer.render(dt, physics.state, currentBreed);
+
+      // Update live Polaroid Viewfinder canvas smoothly (~24fps) while viewfinder modal is open
+      if (isPolaroidOpen && ts - lastPolaroidFrameTs > 40) {
+        lastPolaroidFrameTs = ts;
+        renderLivePolaroidPreview();
+      }
     }
 
     requestAnimationFrame(frame);

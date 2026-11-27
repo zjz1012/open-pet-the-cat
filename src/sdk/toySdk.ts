@@ -49,6 +49,17 @@ export interface ToyCheckInputSafetyResp {
   status: 'ok' | 'rejected' | 'unavailable';
 }
 
+export const AUTHOR_SPACE_MID = '63650';
+export const AUTHOR_SPACE_URL = 'https://space.bilibili.com/63650';
+export const AUTHOR_SELF_NICKNAME = '知喵~';
+const LOCAL_CLOUD_BACKUP_KEY = 'open_pet_the_cat_cat_save_v1';
+
+export interface ToyUserProfile {
+  avatar: string;
+  nickname: string;
+  toyOpenId?: string;
+}
+
 export interface ToySDKGlobal {
   isSupport(ability: string): Promise<boolean>;
   navigate(req: { type: string; id: string; extra?: Record<string, string> }): Promise<void>;
@@ -56,6 +67,7 @@ export interface ToySDKGlobal {
   share(req: { path: string }): Promise<void>;
   sharePicture(req: { url?: string; base64Data?: string }): Promise<void>;
   getQrCode(req?: { path?: string; size?: number }): Promise<{ base64: string; url: string }>;
+  getUserProfile(): Promise<ToyUserProfile>;
   getAuthorProfile(): Promise<ToyAuthorProfileResp>;
   getAuthorRelation(): Promise<ToyAuthorRelationResp>;
   getCloudStorage(keys?: string[]): Promise<Record<string, string>>;
@@ -159,33 +171,77 @@ export class ToyBridge {
   public async getAuthorProfile(): Promise<AuthorInfo | null> {
     const ok = await this.isSupport('getAuthorProfile');
     const sdk = this.getRawSdk();
-    if (!ok || !sdk) return null;
+    if (!ok || !sdk) {
+      return {
+        mid: AUTHOR_SPACE_MID,
+        nickname: AUTHOR_SELF_NICKNAME,
+        avatar: '',
+        follower: null,
+      };
+    }
     try {
       const resp = await sdk.getAuthorProfile();
       if (resp && resp.status === 'ok' && resp.data) {
         return {
-          mid: resp.data.mid !== undefined && resp.data.mid !== null ? String(resp.data.mid) : null,
-          nickname: resp.data.nickname || 'UP主',
+          mid: resp.data.mid !== undefined && resp.data.mid !== null ? String(resp.data.mid) : AUTHOR_SPACE_MID,
+          nickname: resp.data.nickname || AUTHOR_SELF_NICKNAME,
           avatar: resp.data.avatar || '',
           follower: typeof resp.data.follower === 'number' ? resp.data.follower : null,
         };
       }
     } catch {
-      // Ignore profile fetch errors gracefully
+      // Fall back to configured author space info gracefully
+    }
+    return {
+      mid: AUTHOR_SPACE_MID,
+      nickname: AUTHOR_SELF_NICKNAME,
+      avatar: '',
+      follower: null,
+    };
+  }
+
+  /**
+   * Fetch current Bilibili user profile (MUST be triggered inside a user click gesture on first call!).
+   * Used to detect the author herself (`知喵~`) since authors cannot follow themselves on Bilibili.
+   */
+  public async getUserProfile(): Promise<ToyUserProfile | null> {
+    if (!this.isBilibiliHost()) return null;
+    const ok = await this.isSupport('getUserProfile');
+    const sdk = this.getRawSdk();
+    if (!ok || !sdk) return null;
+    try {
+      const resp = await sdk.getUserProfile();
+      if (resp && typeof resp.nickname === 'string') {
+        return resp;
+      }
+    } catch {
+      // User declined or unavailable
     }
     return null;
   }
 
+  public isAuthorSelfNickname(nickname?: string | null): boolean {
+    return typeof nickname === 'string' && nickname.trim() === AUTHOR_SELF_NICKNAME;
+  }
+
   /** Must be called directly inside a user click gesture! */
-  public async navigateToAuthorSpace(mid: string): Promise<boolean> {
+  public async navigateToAuthorSpace(mid = AUTHOR_SPACE_MID): Promise<'sdk' | 'web' | 'failed'> {
+    const targetMid = mid || AUTHOR_SPACE_MID;
     const ok = await this.isSupport('navigate');
     const sdk = this.getRawSdk();
-    if (!ok || !sdk || !mid) return false;
+    if (this.isBilibiliHost() && ok && sdk) {
+      try {
+        await sdk.navigate({ type: 'space', id: targetMid, extra: { from: 'toy' } });
+        return 'sdk';
+      } catch {
+        // Fall through to web space URL if SDK navigate fails
+      }
+    }
     try {
-      await sdk.navigate({ type: 'space', id: mid, extra: { from: 'toy' } });
-      return true;
+      window.open(`https://space.bilibili.com/${encodeURIComponent(targetMid)}`, '_blank', 'noopener,noreferrer');
+      return 'web';
     } catch {
-      return false;
+      return 'failed';
     }
   }
 
@@ -289,38 +345,66 @@ export class ToyBridge {
     }
   }
 
-  /** Read single JSON profile key from Bilibili cloud storage once on startup */
-  public async loadCloudProfile(): Promise<string | null> {
-    const ok = await this.isSupport('getCloudStorage');
-    const sdk = this.getRawSdk();
-    if (!ok || !sdk) return null;
-    try {
-      const data = await sdk.getCloudStorage(['cat_profile_v1']);
-      return typeof data?.cat_profile_v1 === 'string' ? data.cat_profile_v1 : null;
-    } catch {
-      return null;
+  /** Read single JSON profile key from Bilibili cloud storage once on startup (with localStorage mirror fallback) */
+  public async loadCloudProfile(): Promise<{ token: string; source: 'cloud' | 'local' } | null> {
+    if (this.isBilibiliHost()) {
+      const ok = await this.isSupport('getCloudStorage');
+      const sdk = this.getRawSdk();
+      if (ok && sdk) {
+        try {
+          const data = await sdk.getCloudStorage(['cat_profile_v1']);
+          if (typeof data?.cat_profile_v1 === 'string' && data.cat_profile_v1.length > 12) {
+            return { token: data.cat_profile_v1, source: 'cloud' };
+          }
+        } catch {
+          // Fall through to local backup
+        }
+      }
     }
+    try {
+      const local = window.localStorage.getItem(LOCAL_CLOUD_BACKUP_KEY);
+      if (local && local.length > 12) {
+        return { token: local, source: 'local' };
+      }
+    } catch {
+      // Ignore storage errors
+    }
+    return null;
   }
 
-  /** Rate-limit-aware cloud save (single key <= 1024 bytes, exponential backoff on 307044) */
-  public async saveCloudProfile(encodedPayload: string): Promise<void> {
-    if (encodedPayload.length > 980) return;
+  /** Rate-limit-aware cloud save (single key <= 1024 bytes, exponential backoff on 307044, plus local mirror) */
+  public async saveCloudProfile(
+    encodedPayload: string,
+    force = false,
+  ): Promise<'cloud' | 'local' | 'throttled'> {
+    if (!encodedPayload || encodedPayload.length > 980) return 'throttled';
+    try {
+      window.localStorage.setItem(LOCAL_CLOUD_BACKUP_KEY, encodedPayload);
+    } catch {
+      // Ignore private-mode storage errors
+    }
+
+    if (!this.isBilibiliHost()) return 'local';
+
     const now = Date.now();
-    if (now - this.lastCloudSaveTs < Math.max(4000, this.cloudBackoffMs)) return;
+    const minInterval = force ? Math.max(1500, this.cloudBackoffMs) : Math.max(4000, this.cloudBackoffMs);
+    if (now - this.lastCloudSaveTs < minInterval) return 'throttled';
 
     const ok = await this.isSupport('setCloudStorage');
     const sdk = this.getRawSdk();
-    if (!ok || !sdk) return;
+    if (!ok || !sdk) return 'local';
 
     this.lastCloudSaveTs = now;
     try {
       await sdk.setCloudStorage({ cat_profile_v1: encodedPayload });
       this.cloudBackoffMs = 0;
+      return 'cloud';
     } catch (err) {
       const e = err as { type?: string; code?: number };
       if (e?.type === 'http_error' && e?.code === 307044) {
         this.cloudBackoffMs = this.cloudBackoffMs ? Math.min(60000, this.cloudBackoffMs * 2) : 10000;
       }
+      return 'local';
     }
   }
 

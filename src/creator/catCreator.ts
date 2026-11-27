@@ -1,7 +1,20 @@
 import { CAT_BREEDS, type CatBreed, type CoatPatternType } from '../breeds';
+import type { PurrVoicePreference } from '../audio/purrEngine';
 
 export type AtmosphereMode = 'day' | 'rain' | 'night';
 export type CatTemperament = 'angel' | 'normal' | 'spicy';
+export type PolaroidStyleId = 'cream' | 'sakura' | 'film' | 'sticker';
+
+export const POLAROID_STYLE_OPTIONS: {
+  id: PolaroidStyleId;
+  label: string;
+  swatch: string;
+}[] = [
+  { id: 'cream', label: '奶油经典', swatch: 'linear-gradient(135deg, #fcf8f1, #e8dcc8)' },
+  { id: 'sakura', label: '樱花粉萌', swatch: 'linear-gradient(135deg, #ffe5ee, #f8b4cb)' },
+  { id: 'film', label: '复古胶片', swatch: 'linear-gradient(135deg, #2b2622, #151210)' },
+  { id: 'sticker', label: '手账贴纸', swatch: 'linear-gradient(135deg, #fff6d6, #ffd7a8)' },
+];
 
 export interface CustomCatProfile {
   name: string;
@@ -26,6 +39,10 @@ export interface SharedCatState {
   atmosphere: AtmosphereMode;
   presetBreedId: string | null;
   profile: CustomCatProfile;
+  /** Optional cloud-saved audio & camera preferences */
+  purrVolume?: number; // 5..100
+  purrVoice?: PurrVoicePreference;
+  polaroidStyle?: PolaroidStyleId;
 }
 
 export const PATTERN_OPTIONS: { value: CoatPatternType; label: string }[] = [
@@ -36,7 +53,6 @@ export const PATTERN_OPTIONS: { value: CoatPatternType; label: string }[] = [
   { value: 'tortie', label: '玳瑁' },
   { value: 'colorpoint', label: '重点色（暹罗）' },
   { value: 'ragdoll', label: '布偶渐变' },
-  { value: 'sphynx', label: '斯芬克斯无毛' },
 ];
 
 export const TEMPERAMENT_OPTIONS: { value: CatTemperament; label: string; desc: string }[] = [
@@ -158,10 +174,10 @@ export function generateRandomCatProfile(): CustomCatProfile {
   return p;
 }
 
-/** Encodes shared cat state as raw URL-safe base64 token (used for both ?cat=... and #cat=...) */
+/** Encodes shared / cloud-saved cat state as raw URL-safe base64 token (<= 400 bytes) */
 export function encodeSharedCatToken(state: SharedCatState): string {
   const p = state.profile;
-  const payload = {
+  const payload: Record<string, unknown> = {
     a: state.atmosphere,
     b: state.presetBreedId,
     n: p.name,
@@ -181,6 +197,15 @@ export function encodeSharedCatToken(state: SharedCatState): string {
     si: p.sizeIdx,
     wi: p.widthIdx,
   };
+  if (typeof state.purrVolume === 'number') {
+    payload.pv = Math.max(5, Math.min(100, Math.round(state.purrVolume)));
+  }
+  if (state.purrVoice) {
+    payload.vv = state.purrVoice;
+  }
+  if (state.polaroidStyle) {
+    payload.ps = state.polaroidStyle;
+  }
   const json = JSON.stringify(payload);
   return btoa(unescape(encodeURIComponent(json)))
     .replace(/\+/g, '-')
@@ -192,7 +217,7 @@ export function encodeSharedCatHash(state: SharedCatState): string {
   return `#cat=${encodeSharedCatToken(state)}`;
 }
 
-/** Decodes shared cat state from either query (?cat=...), hash (#cat=...), or raw base64 token */
+/** Decodes shared / cloud-saved cat state from query (?cat=...), hash (#cat=...), or raw base64 token */
 export function decodeSharedCatState(input: string): SharedCatState | null {
   let token = '';
   if (input.startsWith('#cat=')) {
@@ -212,8 +237,8 @@ export function decodeSharedCatState(input: string): SharedCatState | null {
     const d = JSON.parse(json) as Record<string, unknown>;
     if (!d || typeof d !== 'object') return null;
 
-    const fallbackBreed =
-      (typeof d.b === 'string' && CAT_BREEDS.find((b) => b.id === d.b)) || CAT_BREEDS[2];
+    const matchedPreset = typeof d.b === 'string' ? CAT_BREEDS.find((b) => b.id === d.b) : undefined;
+    const fallbackBreed = matchedPreset || CAT_BREEDS[1] || CAT_BREEDS[0];
     const base = profileFromBreed(fallbackBreed);
 
     const validPatterns = new Set(PATTERN_OPTIONS.map((o) => o.value));
@@ -231,7 +256,7 @@ export function decodeSharedCatState(input: string): SharedCatState | null {
       secondaryHex: typeof d.c2 === 'string' ? d.c2 : base.secondaryHex,
       tertiaryHex: typeof d.c3 === 'string' ? d.c3 : base.tertiaryHex,
       earInnerHex: typeof d.ce === 'string' ? d.ce : base.earInnerHex,
-      furLength: typeof d.fl === 'number' ? Math.max(0, Math.min(1, d.fl)) : base.furLength,
+      furLength: typeof d.fl === 'number' ? Math.max(0.2, Math.min(1, d.fl)) : base.furLength,
       furClump: typeof d.fc === 'number' ? Math.max(0.08, Math.min(0.95, d.fc)) : base.furClump,
       tailFluff: typeof d.tf === 'number' ? Math.max(0.55, Math.min(1.7, d.tf)) : base.tailFluff,
       ruffFluff: typeof d.rf === 'number' ? Math.max(0, Math.min(1.1, d.rf)) : base.ruffFluff,
@@ -244,19 +269,394 @@ export function decodeSharedCatState(input: string): SharedCatState | null {
     };
 
     const atmosphere: AtmosphereMode = d.a === 'rain' || d.a === 'night' ? d.a : 'day';
+    const purrVolume = typeof d.pv === 'number' ? Math.max(5, Math.min(100, Math.round(d.pv))) : undefined;
+    const purrVoice: PurrVoicePreference | undefined =
+      d.vv === 'auto' || d.vv === 'warm' || d.vv === 'deep' || d.vv === 'soft' ? d.vv : undefined;
+    const polaroidStyle: PolaroidStyleId | undefined =
+      d.ps === 'cream' || d.ps === 'sakura' || d.ps === 'film' || d.ps === 'sticker' ? d.ps : undefined;
 
     return {
       atmosphere,
-      presetBreedId: typeof d.b === 'string' ? d.b : null,
+      presetBreedId: matchedPreset ? matchedPreset.id : null,
       profile,
+      purrVolume,
+      purrVoice,
+      polaroidStyle,
     };
   } catch {
     return null;
   }
 }
 
+function drawPawIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, color: string): void {
+  ctx.save();
+  ctx.fillStyle = color;
+  // Main pad
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + r * 0.25, r * 0.56, r * 0.44, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 4 toes
+  const toes: [number, number, number][] = [
+    [-0.58, -0.22, -0.25],
+    [-0.22, -0.52, -0.08],
+    [0.22, -0.52, 0.08],
+    [0.58, -0.22, 0.25],
+  ];
+  for (const [tx, ty, rot] of toes) {
+    ctx.beginPath();
+    ctx.ellipse(cx + tx * r, cy + ty * r, r * 0.21, r * 0.27, rot, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawSakuraBlossom(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, rot = 0): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(rot);
+  for (let i = 0; i < 5; i++) {
+    ctx.save();
+    ctx.rotate((i * Math.PI * 2) / 5);
+    ctx.fillStyle = i % 2 === 0 ? '#ffbfd3' : '#ffd2e1';
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(r * 0.48, -r * 0.35, r * 0.28, -r * 0.92);
+    ctx.lineTo(0, -r * 0.72);
+    ctx.lineTo(-r * 0.28, -r * 0.92);
+    ctx.quadraticCurveTo(-r * 0.48, -r * 0.35, 0, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.fillStyle = '#f8a54a';
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.16, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawSparkle(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, color: string): void {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  for (let i = 0; i < 4; i++) {
+    const a = (i * Math.PI) / 2;
+    const ax = cx + Math.cos(a) * r;
+    const ay = cy + Math.sin(a) * r;
+    const mid = a + Math.PI / 4;
+    const mx = cx + Math.cos(mid) * r * 0.28;
+    const my = cy + Math.sin(mid) * r * 0.28;
+    if (i === 0) ctx.moveTo(ax, ay);
+    else ctx.lineTo(ax, ay);
+    ctx.lineTo(mx, my);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawFishDoodle(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: number, color: string): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = Math.max(2, s * 0.12);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  // Body oval
+  ctx.beginPath();
+  ctx.ellipse(-s * 0.15, 0, s * 0.62, s * 0.34, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  // Tail triangle
+  ctx.beginPath();
+  ctx.moveTo(s * 0.46, 0);
+  ctx.lineTo(s * 0.88, -s * 0.34);
+  ctx.lineTo(s * 0.88, s * 0.34);
+  ctx.closePath();
+  ctx.stroke();
+  // Eye dot
+  ctx.beginPath();
+  ctx.arc(-s * 0.44, -s * 0.04, s * 0.08, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+export interface PolaroidRenderOptions {
+  catName: string;
+  subtitle: string;
+  atmosphere: AtmosphereMode;
+  style: PolaroidStyleId;
+  /** Target photo inner width in px (use 520 for live viewfinder preview, 960 for final export) */
+  photoWidth?: number;
+  /** Whether to draw viewfinder corner brackets & subtle grid (for live preview only!) */
+  showViewfinderGuides?: boolean;
+}
+
 /**
- * Generates a Polaroid cardstock image as a crisp JPEG data URL (~180–350 KB,
+ * Renders the styled Polaroid card onto a target canvas.
+ * Shared identically between the live Polaroid Viewfinder preview and final exported JPEG!
+ */
+export function drawPolaroidToCanvas(
+  out: HTMLCanvasElement,
+  sourceCanvas: HTMLCanvasElement,
+  opts: PolaroidRenderOptions,
+): boolean {
+  const photoW = opts.photoWidth ?? 960;
+  const k = photoW / 960;
+  const isFilm = opts.style === 'film';
+  const padX = Math.round((isFilm ? 68 : 44) * k);
+  const padTop = Math.round((isFilm ? 46 : 44) * k);
+  const padBottom = Math.round(132 * k);
+  const photoH = Math.round((photoW * sourceCanvas.height) / Math.max(1, sourceCanvas.width));
+
+  const targetW = photoW + padX * 2;
+  const targetH = photoH + padTop + padBottom;
+  if (out.width !== targetW || out.height !== targetH) {
+    out.width = targetW;
+    out.height = targetH;
+  }
+  const ctx = out.getContext('2d');
+  if (!ctx) return false;
+
+  const isNight = opts.atmosphere === 'night';
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')}`;
+  const filmDate = `'${String(now.getFullYear()).slice(2)} ${String(now.getMonth() + 1).padStart(2, '0')} ${String(now.getDate()).padStart(2, '0')}`;
+  const modeLabel = opts.atmosphere === 'rain' ? '雨天午后' : isNight ? '月光时刻' : '晴日暖阳';
+
+  // 1) Cardstock Background by Style
+  if (opts.style === 'sakura') {
+    const grad = ctx.createLinearGradient(0, 0, out.width, out.height);
+    grad.addColorStop(0, '#fff5f8');
+    grad.addColorStop(1, '#ffe7ef');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, out.width, out.height);
+
+    // Dainty dashed pink inner border
+    ctx.save();
+    ctx.strokeStyle = 'rgba(229, 134, 168, 0.42)';
+    ctx.lineWidth = 2.5 * k;
+    ctx.setLineDash([8 * k, 6 * k]);
+    ctx.beginPath();
+    ctx.roundRect(14 * k, 14 * k, out.width - 28 * k, out.height - 28 * k, 18 * k);
+    ctx.stroke();
+    ctx.restore();
+  } else if (opts.style === 'film') {
+    ctx.fillStyle = '#1b1816';
+    ctx.fillRect(0, 0, out.width, out.height);
+
+    // Classic 35mm sprocket holes down left and right rails
+    ctx.fillStyle = '#332e2a';
+    const holeW = 24 * k;
+    const holeH = 34 * k;
+    const step = 62 * k;
+    for (let y = 26 * k; y < out.height - 32 * k; y += step) {
+      ctx.beginPath();
+      ctx.roundRect(18 * k, y, holeW, holeH, 6 * k);
+      ctx.roundRect(out.width - 18 * k - holeW, y, holeW, holeH, 6 * k);
+      ctx.fill();
+    }
+  } else if (opts.style === 'sticker') {
+    const grad = ctx.createLinearGradient(0, 0, 0, out.height);
+    grad.addColorStop(0, '#fffbeb');
+    grad.addColorStop(1, '#fff3d4');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, out.width, out.height);
+
+    // Subtle notebook dot grid
+    ctx.fillStyle = 'rgba(186, 155, 112, 0.16)';
+    for (let y = 24 * k; y < out.height; y += 28 * k) {
+      for (let x = 24 * k; x < out.width; x += 28 * k) {
+        ctx.beginPath();
+        ctx.arc(x, y, 1.5 * k, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  } else {
+    // Classic Cream Polaroid
+    ctx.fillStyle = isNight ? '#1b2331' : '#fcf8f1';
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.strokeStyle = isNight ? 'rgba(200,220,250,0.14)' : 'rgba(92,70,48,0.11)';
+    ctx.lineWidth = 3 * k;
+    ctx.strokeRect(2 * k, 2 * k, out.width - 4 * k, out.height - 4 * k);
+  }
+
+  // 2) Live Cat Photo Frame
+  const radius = (isFilm ? 6 : 12) * k;
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(padX, padTop, photoW, photoH, radius);
+  ctx.clip();
+  ctx.drawImage(sourceCanvas, padX, padTop, photoW, photoH);
+
+  // Subtle style-specific photographic tint / vignette
+  if (opts.style === 'film') {
+    const vig = ctx.createRadialGradient(
+      padX + photoW * 0.5,
+      padTop + photoH * 0.5,
+      photoW * 0.25,
+      padX + photoW * 0.5,
+      padTop + photoH * 0.5,
+      photoW * 0.68,
+    );
+    vig.addColorStop(0, 'rgba(255, 224, 180, 0.03)');
+    vig.addColorStop(1, 'rgba(18, 12, 8, 0.34)');
+    ctx.fillStyle = vig;
+    ctx.fillRect(padX, padTop, photoW, photoH);
+
+    // Retro orange-amber film date imprint inside bottom-right of photo
+    ctx.fillStyle = 'rgba(255, 152, 62, 0.90)';
+    ctx.shadowColor = 'rgba(255, 108, 22, 0.65)';
+    ctx.shadowBlur = 6 * k;
+    ctx.font = `700 ${Math.round(24 * k)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+    ctx.textAlign = 'right';
+    ctx.fillText(filmDate, padX + photoW - 22 * k, padTop + photoH - 20 * k);
+    ctx.shadowBlur = 0;
+  } else if (opts.style === 'sakura') {
+    const blush = ctx.createLinearGradient(padX, padTop, padX, padTop + photoH);
+    blush.addColorStop(0, 'rgba(255, 198, 218, 0.10)');
+    blush.addColorStop(1, 'rgba(255, 220, 232, 0.06)');
+    ctx.fillStyle = blush;
+    ctx.fillRect(padX, padTop, photoW, photoH);
+  }
+
+  // Optional Viewfinder Reticle Guides (only in live viewfinder preview, NOT saved photo!)
+  if (opts.showViewfinderGuides) {
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.52)';
+    ctx.lineWidth = Math.max(1, 1.4 * k);
+    // Rule-of-thirds subtle hairline grid
+    ctx.beginPath();
+    ctx.moveTo(padX + photoW / 3, padTop);
+    ctx.lineTo(padX + photoW / 3, padTop + photoH);
+    ctx.moveTo(padX + (photoW * 2) / 3, padTop);
+    ctx.lineTo(padX + (photoW * 2) / 3, padTop + photoH);
+    ctx.moveTo(padX, padTop + photoH / 3);
+    ctx.lineTo(padX + photoW, padTop + photoH / 3);
+    ctx.moveTo(padX, padTop + (photoH * 2) / 3);
+    ctx.lineTo(padX + photoW, padTop + (photoH * 2) / 3);
+    ctx.stroke();
+
+    // Crisp camera corner brackets
+    const m = 18 * k;
+    const bLen = 28 * k;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.90)';
+    ctx.lineWidth = Math.max(1.5, 2.8 * k);
+    ctx.lineCap = 'round';
+    const corners: [number, number, number, number][] = [
+      [padX + m, padTop + m, 1, 1],
+      [padX + photoW - m, padTop + m, -1, 1],
+      [padX + m, padTop + photoH - m, 1, -1],
+      [padX + photoW - m, padTop + photoH - m, -1, -1],
+    ];
+    for (const [cx, cy, dx, dy] of corners) {
+      ctx.beginPath();
+      ctx.moveTo(cx + dx * bLen, cy);
+      ctx.lineTo(cx, cy);
+      ctx.lineTo(cx, cy + dy * bLen);
+      ctx.stroke();
+    }
+
+    // Center focus crosshair
+    const midX = padX + photoW * 0.5;
+    const midY = padTop + photoH * 0.5;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.72)';
+    ctx.lineWidth = Math.max(1, 1.8 * k);
+    ctx.beginPath();
+    ctx.moveTo(midX - 10 * k, midY);
+    ctx.lineTo(midX + 10 * k, midY);
+    ctx.moveTo(midX, midY - 10 * k);
+    ctx.lineTo(midX, midY + 10 * k);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Inner photo frame stroke
+  ctx.strokeStyle = opts.style === 'film' ? 'rgba(255,255,255,0.12)' : 'rgba(60,40,20,0.10)';
+  ctx.lineWidth = 2 * k;
+  ctx.beginPath();
+  ctx.roundRect(padX, padTop, photoW, photoH, radius);
+  ctx.stroke();
+
+  // 3) Style-Specific Cute Decorations!
+  if (opts.style === 'sakura') {
+    drawSakuraBlossom(ctx, padX + 12 * k, padTop + 10 * k, 24 * k, 0.25);
+    drawSakuraBlossom(ctx, padX + photoW - 10 * k, padTop + 18 * k, 18 * k, -0.4);
+    drawSakuraBlossom(ctx, out.width - padX - 24 * k, padTop + photoH + 56 * k, 20 * k, 0.6);
+    drawPawIcon(ctx, out.width - padX - 76 * k, padTop + photoH + 62 * k, 14 * k, '#f19cb9');
+  } else if (opts.style === 'sticker') {
+    // Diagonal translucent pastel washi tape strips at top corners
+    ctx.save();
+    ctx.translate(padX + 26 * k, padTop + 8 * k);
+    ctx.rotate(-0.42);
+    ctx.fillStyle = 'rgba(155, 218, 198, 0.74)';
+    ctx.fillRect(-52 * k, -14 * k, 104 * k, 26 * k);
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(padX + photoW - 24 * k, padTop + 10 * k);
+    ctx.rotate(0.40);
+    ctx.fillStyle = 'rgba(255, 188, 158, 0.78)';
+    ctx.fillRect(-52 * k, -14 * k, 104 * k, 26 * k);
+    ctx.restore();
+
+    // Cute stickers along bottom margin
+    drawSparkle(ctx, padX + photoW - 34 * k, padTop + photoH + 46 * k, 14 * k, '#f2a93b');
+    drawSparkle(ctx, padX + photoW - 62 * k, padTop + photoH + 34 * k, 8 * k, '#f0869a');
+    drawFishDoodle(ctx, padX + photoW - 116 * k, padTop + photoH + 54 * k, 22 * k, '#d58547');
+    drawPawIcon(ctx, padX + 20 * k, padTop + photoH + 52 * k, 13 * k, '#e89d54');
+  } else if (opts.style === 'cream') {
+    drawPawIcon(
+      ctx,
+      out.width - padX - 18 * k,
+      padTop + photoH + 46 * k,
+      12 * k,
+      isNight ? 'rgba(190, 212, 245, 0.35)' : 'rgba(160, 128, 96, 0.32)',
+    );
+  }
+
+  // 4) Caption & Date Typography
+  const textLeft = opts.style === 'sticker' ? padX + 46 * k : padX + 8 * k;
+  const titleColor =
+    opts.style === 'sakura'
+      ? '#7c3f56'
+      : opts.style === 'film'
+        ? '#f0e6d6'
+        : opts.style === 'sticker'
+          ? '#573c24'
+          : isNight
+            ? '#dce8fa'
+            : '#3d332a';
+  const subColor =
+    opts.style === 'sakura'
+      ? '#b4748c'
+      : opts.style === 'film'
+        ? '#9c8f80'
+        : opts.style === 'sticker'
+          ? '#9b7752'
+          : isNight
+            ? '#8b9bb2'
+            : '#8d7d6c';
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = titleColor;
+  ctx.font = `600 ${Math.round(31 * k)}px "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif`;
+  ctx.fillText(opts.catName || '我的小猫', textLeft, padTop + photoH + 58 * k);
+
+  ctx.fillStyle = subColor;
+  ctx.font = `400 ${Math.round(20 * k)}px "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif`;
+  ctx.fillText(`${opts.subtitle} · ${modeLabel}`, textLeft, padTop + photoH + 95 * k);
+
+  ctx.textAlign = 'right';
+  ctx.font = `500 ${Math.round(19 * k)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+  ctx.fillStyle = opts.style === 'film' ? '#d49a5a' : subColor;
+  const rightStamp = opts.style === 'film' ? `CAT 400 · ${dateStr}` : dateStr;
+  ctx.fillText(rightStamp, out.width - padX - 8 * k, padTop + photoH + 94 * k);
+
+  return true;
+}
+
+/**
+ * Generates a Polaroid cardstock image as a crisp JPEG data URL (~180–420 KB,
  * well below Bilibili Toy SDK's 2MB base64 recommendation for saveImageToAlbum & sharePicture).
  */
 export function renderPolaroidDataUrl(
@@ -264,61 +664,55 @@ export function renderPolaroidDataUrl(
   catName: string,
   subtitle: string,
   atmosphere: AtmosphereMode,
+  style: PolaroidStyleId = 'cream',
 ): string | null {
-  const padX = 42;
-  const padTop = 42;
-  const padBottom = 122;
-  const photoW = 960;
-  const photoH = Math.round((photoW * sourceCanvas.height) / Math.max(1, sourceCanvas.width));
-
   const out = document.createElement('canvas');
-  out.width = photoW + padX * 2;
-  out.height = photoH + padTop + padBottom;
-  const ctx = out.getContext('2d');
-  if (!ctx) return null;
-
-  ctx.fillStyle = atmosphere === 'night' ? '#1c2432' : '#fcf8f1';
-  ctx.fillRect(0, 0, out.width, out.height);
-
-  ctx.strokeStyle = atmosphere === 'night' ? 'rgba(200,220,250,0.12)' : 'rgba(80,60,40,0.10)';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(2, 2, out.width - 4, out.height - 4);
-
-  ctx.save();
-  ctx.beginPath();
-  ctx.roundRect(padX, padTop, photoW, photoH, 10);
-  ctx.clip();
-  ctx.drawImage(sourceCanvas, padX, padTop, photoW, photoH);
-  ctx.restore();
-
-  ctx.strokeStyle = 'rgba(0,0,0,0.08)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.roundRect(padX, padTop, photoW, photoH, 10);
-  ctx.stroke();
-
-  const now = new Date();
-  const dateStr = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')}`;
-  const modeLabel = atmosphere === 'rain' ? '雨天午后' : atmosphere === 'night' ? '月光时刻' : '晴日暖阳';
-
-  ctx.fillStyle = atmosphere === 'night' ? '#dce8fa' : '#3d332a';
-  ctx.font = '600 30px "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif';
-  ctx.fillText(catName, padX + 6, padTop + photoH + 56);
-
-  ctx.fillStyle = atmosphere === 'night' ? '#8b9bb2' : '#8d7d6c';
-  ctx.font = '400 20px "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif';
-  ctx.fillText(`${subtitle} · ${modeLabel}`, padX + 6, padTop + photoH + 92);
-
-  ctx.textAlign = 'right';
-  ctx.font = '500 20px ui-monospace, SFMono-Regular, Menlo, monospace';
-  ctx.fillText(dateStr, out.width - padX - 6, padTop + photoH + 88);
-
+  const ok = drawPolaroidToCanvas(out, sourceCanvas, {
+    catName,
+    subtitle,
+    atmosphere,
+    style,
+    photoWidth: 960,
+    showViewfinderGuides: false,
+  });
+  if (!ok) return null;
   return out.toDataURL('image/jpeg', 0.90);
+}
+
+export async function saveDataUrlInBrowser(dataUrl: string, filename: string): Promise<'shared' | 'downloaded'> {
+  // On mobile browsers that support Web Share API with files, offer native save/share sheet cleanly
+  const isTouchMobile =
+    typeof navigator !== 'undefined' &&
+    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '') &&
+    typeof navigator.share === 'function' &&
+    typeof navigator.canShare === 'function';
+
+  if (isTouchMobile) {
+    try {
+      const resp = await fetch(dataUrl);
+      const blob = await resp.blob();
+      const file = new File([blob], filename, { type: 'image/jpeg' });
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: '小猫拍立得留念',
+        });
+        return 'shared';
+      }
+    } catch {
+      // User cancelled share sheet or unsupported — fall through to direct browser download
+    }
+  }
+
+  downloadDataUrl(dataUrl, filename);
+  return 'downloaded';
 }
 
 export function downloadDataUrl(dataUrl: string, filename: string): void {
   const link = document.createElement('a');
   link.download = filename;
   link.href = dataUrl;
+  document.body.appendChild(link);
   link.click();
+  link.remove();
 }

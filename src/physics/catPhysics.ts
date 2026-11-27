@@ -97,6 +97,7 @@ export interface CatPhysicsState {
   handPress: number;
   handVisibility: number;
   isOverCat: boolean;
+  isActivelyPetting: boolean;
   isHeadZone: number;
   strokeSpeed: number;
   autoPetting: boolean;
@@ -143,13 +144,30 @@ export class CatPhysics {
   private happyStreak = 0;
   private pounceCooldown = 0;
 
-  // Self-grooming (licking ruffled fur smooth!)
+  // Self-grooming (licking ruffled fur smooth!) & realistic feline tail state machine
   private idleSinceRuffle = 0;
   private isSelfGrooming = false;
   private groomSide = 1; // -1 = top flank, +1 = bottom flank
   private groomPhase = 0;
   private lastLickIdx = -1;
   private groomShiftVel: Vec2 = { x: 0, y: 0 };
+
+  // Realistic feline tail moods:
+  // 1) bristleLash: vigorous side-to-side tail lashes several times when ruffled, before self-grooming
+  // 2) tailStiff: taut straight tail ("绷直") when butt-patted
+  // 3) withGrainSway: soft gentle sway when stroked smoothly with the grain
+  // 4) idleTail: calm rest with occasional random lazy sway or tip flick when untouched
+  private bristleLashTimer = 0;
+  private bristleLashPhase = 0;
+  private bristleLashPending = false;
+  private tailStiffTimer = 0;
+  private tailStiff = 0;
+  private withGrainSway = 0;
+  private idleTailCooldown = 2.6;
+  private idleTailTimer = 0;
+  private idleTailDur = 1.6;
+  private idleTailMode: 'sway' | 'tip' = 'sway';
+  private idleTailDir = 1;
 
   // Grooming shedding accumulator
   private shedAccumulator = 0;
@@ -160,6 +178,14 @@ export class CatPhysics {
     { x: 0.395, y: 0.062 },
     { x: 0.405, y: 0.148 },
     { x: 0.335, y: 0.195 },
+  ];
+  /** Straightened taut tail pose for butt-patting ("拍屁股尾巴绷直") preserving segment lengths */
+  private tailStraight: Vec2[] = [
+    { x: 0.195, y: -0.005 },
+    { x: 0.305, y: -0.010 },
+    { x: 0.413, y: -0.016 },
+    { x: 0.499, y: -0.022 },
+    { x: 0.583, y: -0.026 },
   ];
   private tailVel: Vec2[] = this.tailRest.map(() => ({ x: 0, y: 0 }));
 
@@ -205,6 +231,7 @@ export class CatPhysics {
       handPress: 0,
       handVisibility: 0,
       isOverCat: false,
+      isActivelyPetting: false,
       isHeadZone: 0,
       strokeSpeed: 0,
       autoPetting: false,
@@ -308,9 +335,12 @@ export class CatPhysics {
       this.state.patImpulse = 1.0;
       this.rumpLiftVel += hit.zone === 'rump' ? 5.2 : 2.8;
       this.state.contentment = Math.min(1, this.state.contentment + 0.16);
-      // Tail perks up enthusiastically
-      this.tailVel[1].y -= 0.25;
-      this.tailVel[2].y -= 0.42;
+      // Butt-patting makes the cat's tail straighten tautly ("绷直")!
+      this.tailStiffTimer = Math.min(2.2, 1.35 + this.patCombo * 0.12);
+      this.bristleLashTimer = 0;
+      this.tailVel[1].x += 0.35;
+      this.tailVel[2].x += 0.55;
+      this.tailVel[3].y -= 0.45;
       return this.patCombo;
     }
     return 0;
@@ -478,6 +508,7 @@ export class CatPhysics {
 
     // 3) Feline Mood, Against-Grain Bristling ("炸毛") & Self-Grooming Licking!
     const isActivelyPetting = st.isOverCat && (st.handPress > 0.25 || speedMag > 0.06);
+    st.isActivelyPetting = isActivelyPetting;
     // Natural torso fur grows left -> right (+X).
     // Combing or rubbing right -> left (-X) is AGAINST the grain -> bristles fur (炸毛)!
     const againstGrainComb =
@@ -513,21 +544,30 @@ export class CatPhysics {
       st.ruffleLevel = Math.min(1.0, st.ruffleLevel + clampedDt * ruffleRate);
       this.groomSide = localHand.y >= 0 ? 1 : -1;
       this.idleSinceRuffle = 0;
+      this.tailStiffTimer = 0;
+      // Trigger vigorous side-to-side tail lashes when bristled!
+      this.bristleLashTimer = Math.max(this.bristleLashTimer, 1.55);
+      this.bristleLashPending = true;
     } else if (withGrainStroke) {
       // Combing or stroking WITH the grain also smooths ruffled fur!
       st.ruffleLevel = Math.max(0, st.ruffleLevel - clampedDt * (st.toolMode === 'comb' ? 1.4 : 0.7));
+      if (st.ruffleLevel < 0.2) this.bristleLashPending = false;
     }
 
     if ((againstGrainStroke || tailYank) && this.temperament !== 'angel') {
       const spicyMul = this.temperament === 'spicy' ? 1.75 : 1.0;
       const rageRate = (tailYank ? 0.85 : againstGrainComb ? 0.72 : 0.58) * spicyMul;
       st.annoyance = Math.min(1.0, st.annoyance + clampedDt * rageRate);
+      if (tailYank) {
+        this.bristleLashTimer = Math.max(this.bristleLashTimer, 1.35);
+      }
       if (st.annoyance > 0.24 && this.twitchPhase <= 0) {
         this.twitchPhase = 1.0;
       }
       if (st.annoyance >= 0.92 && this.pushbackTimer <= 0) {
         this.pushbackTimer = 0.55;
         st.annoyance = 0.62;
+        this.bristleLashTimer = Math.max(this.bristleLashTimer, 1.75);
         events.hissPushback = true;
       }
     } else {
@@ -535,10 +575,15 @@ export class CatPhysics {
       st.annoyance = Math.max(0, st.annoyance - clampedDt * calmRate);
     }
 
-    // Trigger adorable self-grooming after user stops messing with ruffled fur for ~0.85s!
-    if (!isActivelyPetting && st.laserVisible < 0.2 && st.ruffleLevel > 0.26) {
+    // Feline sequence after bristling: FIRST whip tail vigorously side-to-side several times,
+    // THEN curl head down to self-groom & smooth the ruffled fur!
+    if (!isActivelyPetting && st.laserVisible < 0.2 && st.ruffleLevel > 0.24) {
+      if (this.bristleLashPending) {
+        this.bristleLashPending = false;
+        this.bristleLashTimer = Math.max(this.bristleLashTimer, 1.65);
+      }
       this.idleSinceRuffle += clampedDt;
-      if (!this.isSelfGrooming && this.idleSinceRuffle > 0.85) {
+      if (!this.isSelfGrooming && this.bristleLashTimer <= 0.12 && this.idleSinceRuffle > 0.45) {
         this.isSelfGrooming = true;
         this.groomPhase = 0;
         this.lastLickIdx = -1;
@@ -833,28 +878,96 @@ export class CatPhysics {
     this.rumpLiftVel += ((targetRump - st.rumpLift) * 58 - this.rumpLiftVel * 9.0) * clampedDt;
     st.rumpLift = Math.max(0, Math.min(1.2, st.rumpLift + this.rumpLiftVel * clampedDt));
 
-    // 8) Articulated Tail Physics (content slow sway / hunter twitch / irritated fast lash!)
+    // 8) Realistic Feline Tail State Machine:
+    //    a) Butt-patting -> tail stiffens & straightens tautly ("绷直")
+    //    b) Bristling ("炸毛") -> vigorous side-to-side tail lashes several times before grooming
+    //    c) Smooth with-grain petting -> gentle slight rhythmic sway
+    //    d) Completely untouched -> mostly still with occasional random lazy sway or tip flick
+    if (this.tailStiffTimer > 0) {
+      this.tailStiffTimer = Math.max(0, this.tailStiffTimer - clampedDt);
+    }
+    const targetStiff = this.tailStiffTimer > 0 ? 1.0 : 0.0;
+    const stiffRate = targetStiff > this.tailStiff ? 11.0 : 2.6;
+    this.tailStiff += (targetStiff - this.tailStiff) * Math.min(1, clampedDt * stiffRate);
+
+    if (this.bristleLashTimer > 0) {
+      this.bristleLashTimer = Math.max(0, this.bristleLashTimer - clampedDt);
+      this.bristleLashPhase += clampedDt * 11.8; // ~2 full side-to-side whips per second (3-4 strong lashes)
+    }
+    const lashEnv = Math.min(1.0, this.bristleLashTimer / 0.45);
+    const lashStrength = Math.max(lashEnv, st.annoyance * 0.92) * (1 - this.tailStiff);
+
+    const smoothPetNow = isActivelyPetting && !againstGrainStroke && !tailYank && this.tailStiff < 0.35;
+    this.withGrainSway += ((smoothPetNow ? 1.0 : 0.0) - this.withGrainSway) * Math.min(1, clampedDt * 3.5);
+
     const hunterBoost = st.laserVisible > 0.3 ? 1.0 : 0.0;
-    const wagFreq = 1.05 + st.contentment * 0.55 + st.annoyance * 4.8 + hunterBoost * 3.2;
-    const wagAmp =
-      0.012 + st.contentment * 0.024 + st.rumpLift * 0.030 + st.annoyance * 0.075 + hunterBoost * 0.032;
+    const isUntouchedIdle =
+      !isActivelyPetting &&
+      this.tailStiff < 0.08 &&
+      lashStrength < 0.08 &&
+      hunterBoost < 0.1 &&
+      !this.isSelfGrooming;
+
+    // Occasional random gentle sway or tip twitch when completely untouched
+    let idleWave = 0;
+    let idleTipOnly = 0;
+    if (isUntouchedIdle) {
+      if (this.idleTailTimer > 0) {
+        this.idleTailTimer = Math.max(0, this.idleTailTimer - clampedDt);
+        const progress = 1 - this.idleTailTimer / Math.max(0.1, this.idleTailDur);
+        const env = Math.sin(progress * Math.PI);
+        if (this.idleTailMode === 'sway') {
+          idleWave = Math.sin(progress * Math.PI * 2.0) * env * 0.026 * this.idleTailDir;
+        } else {
+          idleTipOnly = Math.sin(progress * Math.PI * 2.5) * env * 0.028 * this.idleTailDir;
+        }
+      } else {
+        this.idleTailCooldown -= clampedDt;
+        if (this.idleTailCooldown <= 0) {
+          this.idleTailMode = Math.random() < 0.52 ? 'tip' : 'sway';
+          this.idleTailDur = this.idleTailMode === 'tip' ? 0.55 + Math.random() * 0.30 : 1.65 + Math.random() * 0.75;
+          this.idleTailTimer = this.idleTailDur;
+          this.idleTailDir = Math.random() < 0.5 ? 1 : -1;
+          this.idleTailCooldown = 2.6 + Math.random() * 3.8;
+        }
+      }
+    } else {
+      this.idleTailTimer = 0;
+    }
 
     for (let i = 0; i < this.tailRest.length; i++) {
       const rest = this.tailRest[i];
+      const straight = this.tailStraight[i];
       const pt = st.tailPoints[i];
       const vel = this.tailVel[i];
 
       if (i === 0) {
         pt.x = rest.x;
-        pt.y = rest.y - st.rumpLift * 0.012;
+        pt.y = rest.y - st.rumpLift * 0.014;
         continue;
       }
 
       const frac = i / (this.tailRest.length - 1);
-      const wave = Math.sin(st.time * wagFreq - frac * 1.9) * wagAmp * frac;
-      const curlTight = st.rumpLift * 0.035 * frac;
-      const goalX = rest.x - curlTight * 0.9 + Math.cos(st.time * 0.7 + frac) * 0.008 * frac;
-      const goalY = rest.y + wave - st.rumpLift * 0.028 * frac;
+
+      // Base posture: interpolate relaxed curl -> straight taut tail when butt-patted ("绷直")
+      // Or straighten slightly outward during angry side-to-side lashing so swings sweep dramatically!
+      const stretchMix = Math.max(this.tailStiff, lashStrength * 0.62);
+      const baseX = rest.x + (straight.x - rest.x) * stretchMix;
+      const baseY = rest.y + (straight.y - rest.y) * stretchMix;
+
+      // 1) Vigorous angry side-to-side lash during 炸毛
+      const lashWave = Math.sin(this.bristleLashPhase - frac * 1.65) * 0.155 * lashStrength * frac;
+      // 2) Gentle slight sway during smooth with-grain petting
+      const petWave = Math.sin(st.time * 1.85 - frac * 1.7) * 0.020 * this.withGrainSway * frac;
+      // 3) Subtle taut quiver at tip when butt-patted ("绷直")
+      const stiffQuiver = Math.sin(st.time * 26.0 - frac * 2.0) * 0.005 * this.tailStiff * frac * frac;
+      // 4) Excited hunter tip twitch during laser chase
+      const hunterWave = Math.sin(st.time * 5.2 - frac * 2.1) * 0.036 * hunterBoost * frac * frac;
+      // 5) Rare random idle sway / tiny tip twitch when completely untouched
+      const idleDisp = idleWave * frac + idleTipOnly * frac * frac;
+
+      const goalX = baseX + Math.cos(st.time * 0.6 + frac) * 0.0025 * frac;
+      const goalY = baseY + lashWave + petWave + stiffQuiver + hunterWave + idleDisp;
 
       let pushX = 0;
       let pushY = 0;
@@ -869,8 +982,8 @@ export class CatPhysics {
         }
       }
 
-      const k = 32 - frac * 12 + st.annoyance * 18;
-      const damp = 6.2 - frac * 1.2;
+      const k = 30 - frac * 10 + this.tailStiff * 46 + lashStrength * 34;
+      const damp = 6.6 - frac * 1.1 + this.tailStiff * 3.8;
       vel.x += ((goalX - pt.x) * k + pushX * 28 - vel.x * damp) * clampedDt;
       vel.y += ((goalY - pt.y) * k + pushY * 28 - vel.y * damp) * clampedDt;
 
