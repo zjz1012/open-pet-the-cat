@@ -205,6 +205,14 @@ export class CatRenderer {
     gl.uniform1f(this.sceneUniforms.uNight, this.currentNight);
     gl.uniform1f(this.sceneUniforms.uRain, this.currentRain);
 
+    gl.uniform2f(this.sceneUniforms.uCatPos, state.catPos.x, state.catPos.y);
+    gl.uniform1f(this.sceneUniforms.uCatHeading, state.catHeading);
+    gl.uniform1f(this.sceneUniforms.uSpineBend, state.spineBend);
+    gl.uniform1f(this.sceneUniforms.uWalkPhase, state.walkPhase);
+    gl.uniform1f(this.sceneUniforms.uWalkAmp, state.walkAmp);
+    gl.uniform1f(this.sceneUniforms.uPupilDilation, state.pupilDilation);
+    gl.uniform1f(this.sceneUniforms.uEyeSquint, state.eyeSquint);
+    gl.uniform1f(this.sceneUniforms.uPawReach, state.pawReach);
     gl.uniform1f(this.sceneUniforms.uCatSize, state.catSize);
     gl.uniform1f(this.sceneUniforms.uTorsoWidth, state.torsoWidth);
     gl.uniform1f(this.sceneUniforms.uBreath, state.breath);
@@ -280,6 +288,8 @@ export class CatRenderer {
       'uSimTex', 'uNoiseTex', 'uBgTex', 'uHandTex',
       'uHasBgTex', 'uHasHandTex', 'uBgAspectSize', 'uHandTexSize',
       'uTime', 'uAspect', 'uNight', 'uRain',
+      'uCatPos', 'uCatHeading', 'uSpineBend', 'uWalkPhase', 'uWalkAmp',
+      'uPupilDilation', 'uEyeSquint', 'uPawReach',
       'uCatSize', 'uTorsoWidth', 'uBreath',
       'uLeftEarSquish', 'uRightEarSquish', 'uHeadPress', 'uRumpLift',
       'uHeadYaw', 'uGroomHeadShift', 'uRuffleLevel', 'uPounceOffset', 'uSkinTwitch', 'uTail',

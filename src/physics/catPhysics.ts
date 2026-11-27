@@ -55,6 +55,21 @@ export interface CatPhysicsState {
   rightEarSquish: number;
   headPress: number;
   rumpLift: number;
+  /** Whole-body position on cushion in stage UV (0..1) */
+  catPos: Vec2;
+  /** Whole-body heading in radians (0 = facing left; spins freely 360° chasing laser!) */
+  catHeading: number;
+  /** Flexible spine bend (-0.55..+0.55) curving naturally into turns */
+  spineBend: number;
+  /** Stalking/scampering stride phase & intensity (0..1) */
+  walkPhase: number;
+  walkAmp: number;
+  /** 0 = relaxed oval pupils, 1 = huge dilated hunter pupils ("黑葡萄大眼") */
+  pupilDilation: number;
+  /** 0 = eyes wide open, 1 = happy squinted/closed eyes ("眯眯眼" / blinking) */
+  eyeSquint: number;
+  /** 0..1 front paws extending slightly when pouncing at laser */
+  pawReach: number;
   /** Head yaw angle (radians) when tracking laser OR turning to groom shoulder */
   headYaw: number;
   /** Gentle head shift in cat-local coords during self-grooming lean */
@@ -114,6 +129,11 @@ export class CatPhysics {
   private handPressVel = 0;
   private headYawVel = 0;
   private pounceVel = 0;
+  private headingVel = 0;
+  private spineBendVel = 0;
+  private catPosVel: Vec2 = { x: 0, y: 0 };
+  private blinkTimer = 3.2;
+  private blinkDur = 0;
 
   // Mood, twitch, hiss pushback, bongo-pat & self-grooming state
   private pushbackTimer = 0;
@@ -159,6 +179,14 @@ export class CatPhysics {
       rightEarSquish: 0,
       headPress: 0,
       rumpLift: 0,
+      catPos: { x: 0.525, y: 0.545 },
+      catHeading: 0,
+      spineBend: 0,
+      walkPhase: 0,
+      walkAmp: 0,
+      pupilDilation: 0.35,
+      eyeSquint: 0.25,
+      pawReach: 0,
       headYaw: 0,
       groomHeadShift: { x: 0, y: 0 },
       lickPos: { x: 0.45, y: 0.54 },
@@ -289,22 +317,26 @@ export class CatPhysics {
   }
 
   public stageToCatLocal(u: number, v: number, aspect: number): Vec2 {
-    const centerX = 0.525;
-    const centerY = 0.545;
-    const s = Math.max(0.55, this.state.catSize);
+    const s = Math.max(0.55, this.state.catSize) * 1.08;
+    const dx = ((u - this.state.catPos.x) * aspect) / s;
+    const dy = (v - this.state.catPos.y) / s;
+    const c = Math.cos(-this.state.catHeading);
+    const sn = Math.sin(-this.state.catHeading);
     return {
-      x: ((u - centerX) * aspect) / (s * 1.08),
-      y: (v - centerY) / (s * 1.08),
+      x: c * dx - sn * dy,
+      y: sn * dx + c * dy,
     };
   }
 
   public catLocalToStage(local: Vec2, aspect: number): Vec2 {
-    const centerX = 0.525;
-    const centerY = 0.545;
-    const s = Math.max(0.55, this.state.catSize);
+    const s = Math.max(0.55, this.state.catSize) * 1.08;
+    const c = Math.cos(this.state.catHeading);
+    const sn = Math.sin(this.state.catHeading);
+    const rx = c * local.x - sn * local.y;
+    const ry = sn * local.x + c * local.y;
     return {
-      x: centerX + (local.x * s * 1.08) / Math.max(0.1, aspect),
-      y: centerY + local.y * s * 1.08,
+      x: this.state.catPos.x + (rx * s) / Math.max(0.1, aspect),
+      y: this.state.catPos.y + ry * s,
     };
   }
 
@@ -630,37 +662,121 @@ export class CatPhysics {
       fb.y = Math.max(0.10, Math.min(0.92, fb.y));
     }
 
-    // 5) Laser Pointer Tracking & Hunter Pounce!
+    // 5) Whole-Body 360° Laser Chasing, Spinning in Circles, Pouncing & Returning to Cushion Center!
     const wantLaser = isLaserTool && activeNow ? 1.0 : 0.0;
     st.laserVisible += (wantLaser - st.laserVisible) * Math.min(1, clampedDt * 16);
     if (isLaserTool && activeNow) {
-      // Natural tiny hand-tremor jitter makes the red laser dot look super real!
-      const jitterX = (Math.sin(st.time * 27.3) * 0.0022 + Math.cos(st.time * 41.7) * 0.0015);
-      const jitterY = (Math.cos(st.time * 31.1) * 0.0022 + Math.sin(st.time * 37.9) * 0.0015);
+      const jitterX = Math.sin(st.time * 27.3) * 0.0022 + Math.cos(st.time * 41.7) * 0.0015;
+      const jitterY = Math.cos(st.time * 31.1) * 0.0022 + Math.sin(st.time * 37.9) * 0.0015;
       st.laserPos.x += (targetU + jitterX - st.laserPos.x) * Math.min(1, clampedDt * 24);
       st.laserPos.y += (targetV + jitterY - st.laserPos.y) * Math.min(1, clampedDt * 24);
     }
 
     let targetYaw = 0;
     let targetPounce = 0;
+    let targetSpineBend = 0;
+    let targetPawReach = 0;
+    let isChasing = false;
+
+    const restPosX = 0.525;
+    const restPosY = 0.545;
+
     if (st.laserVisible > 0.25) {
-      const localLaser = this.stageToCatLocal(st.laserPos.x, st.laserPos.y, aspect);
-      const dx = localLaser.x - (-0.305);
-      const dy = localLaser.y - (-0.01);
-      const dist = Math.hypot(dx, dy);
-      // Cat faces -X (angle PI). Compute relative angle in [-PI, PI]
-      const rawAng = Math.atan2(dy, -dx);
-      targetYaw = Math.max(-0.55, Math.min(0.55, rawAng * 0.65));
-      // Subtle crouched readiness + playful forward pounce when dot is near front of face!
-      if (dist < 0.34 && dx < 0.02) {
-        if (this.pounceCooldown <= 0 && (this.pointerDown || dist < 0.21)) {
-          this.pounceVel += 0.62;
-          this.pounceCooldown = 1.1;
+      isChasing = true;
+      // Vector from cat center to red laser dot in aspect-corrected stage space
+      const worldDx = (st.laserPos.x - st.catPos.x) * aspect;
+      const worldDy = st.laserPos.y - st.catPos.y;
+      const worldDist = Math.hypot(worldDx, worldDy);
+
+      // Desired heading so the cat's head (-X in local space) points right at the laser!
+      const desiredHeading = Math.atan2(-worldDy, -worldDx);
+      // Shortest signed angular delta in [-PI, PI] so spinning around the cat rotates smoothly 360°!
+      let angleDiff = desiredHeading - st.catHeading;
+      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+
+      // Head leads the turn eagerly!
+      targetYaw = Math.max(-0.58, Math.min(0.58, angleDiff * 0.85));
+      // Spine curves organically into the turn while spinning in circles!
+      targetSpineBend = Math.max(-0.48, Math.min(0.48, angleDiff * 0.45));
+
+      // Whole body spins smoothly toward the red dot (faster when dot orbits around the cat!)
+      const turnGain = worldDist > 0.06 ? 26.0 : 12.0;
+      this.headingVel += (angleDiff * turnGain - this.headingVel * 6.8) * clampedDt;
+      st.catHeading += this.headingVel * clampedDt;
+
+      // Scamper / prowl forward toward the laser dot when it's outside paw reach!
+      const stopDist = 0.24 * st.catSize;
+      if (worldDist > stopDist && Math.abs(angleDiff) < 1.25) {
+        const forwardSpeed = Math.min(0.48, (worldDist - stopDist) * 1.45) * Math.max(0.25, Math.cos(angleDiff));
+        const dirX = worldDx / (worldDist + 1e-4);
+        const dirY = worldDy / (worldDist + 1e-4);
+        const targetVx = (dirX * forwardSpeed) / Math.max(0.5, aspect);
+        const targetVy = dirY * forwardSpeed;
+        this.catPosVel.x += (targetVx - this.catPosVel.x) * Math.min(1, clampedDt * 8.0);
+        this.catPosVel.y += (targetVy - this.catPosVel.y) * Math.min(1, clampedDt * 8.0);
+      } else {
+        this.catPosVel.x *= Math.exp(-clampedDt * 9.0);
+        this.catPosVel.y *= Math.exp(-clampedDt * 9.0);
+      }
+
+      // Playful pounce & front paw bat when dot gets close in front of nose!
+      if (worldDist < 0.34 * st.catSize && Math.abs(angleDiff) < 0.72) {
+        targetPawReach = 0.55;
+        if (this.pounceCooldown <= 0 && (this.pointerDown || worldDist < 0.23 * st.catSize)) {
+          this.pounceVel += 0.68;
+          this.pounceCooldown = 0.95;
         } else {
-          targetPounce = -0.014; // hunter crouch back
+          targetPounce = -0.014;
         }
       }
+    } else {
+      // Gently walk & rotate back to cozy horizontal resting position on the sunlit cushion
+      let restAngleDiff = 0 - st.catHeading;
+      while (restAngleDiff > Math.PI) restAngleDiff -= Math.PI * 2;
+      while (restAngleDiff < -Math.PI) restAngleDiff += Math.PI * 2;
+
+      this.headingVel += (restAngleDiff * 11.0 - this.headingVel * 5.8) * clampedDt;
+      st.catHeading += this.headingVel * clampedDt;
+      targetSpineBend = Math.max(-0.32, Math.min(0.32, restAngleDiff * 0.25));
+
+      const toRestX = restPosX - st.catPos.x;
+      const toRestY = restPosY - st.catPos.y;
+      this.catPosVel.x += (toRestX * 3.8 - this.catPosVel.x * 5.5) * clampedDt;
+      this.catPosVel.y += (toRestY * 3.8 - this.catPosVel.y * 5.5) * clampedDt;
     }
+
+    // Apply bounded cushion movement so the cat stays comfortably inside the cushion
+    st.catPos.x = Math.max(0.26, Math.min(0.76, st.catPos.x + this.catPosVel.x * clampedDt));
+    st.catPos.y = Math.max(0.28, Math.min(0.76, st.catPos.y + this.catPosVel.y * clampedDt));
+
+    const moveSpeed = Math.hypot(this.catPosVel.x * aspect, this.catPosVel.y) + Math.abs(this.headingVel) * 0.14;
+    const targetWalkAmp = Math.min(1.0, moveSpeed * 2.4);
+    st.walkAmp += (targetWalkAmp - st.walkAmp) * Math.min(1, clampedDt * 8.0);
+    st.walkPhase += clampedDt * (5.0 + st.walkAmp * 9.5);
+
+    this.spineBendVel += ((targetSpineBend - st.spineBend) * 42 - this.spineBendVel * 8.2) * clampedDt;
+    st.spineBend = Math.max(-0.58, Math.min(0.58, st.spineBend + this.spineBendVel * clampedDt));
+
+    // Dynamic Eye Expressions: natural blink, happy squint ("眯眯眼") when petted, HUGE dilated pupils when chasing laser!
+    this.blinkTimer -= clampedDt;
+    if (this.blinkTimer <= 0 && !isChasing) {
+      this.blinkDur = 0.17;
+      this.blinkTimer = 3.2 + Math.random() * 3.6;
+    }
+    if (this.blinkDur > 0) this.blinkDur = Math.max(0, this.blinkDur - clampedDt);
+    const blinkVal = this.blinkDur > 0 ? Math.sin((this.blinkDur / 0.17) * Math.PI) : 0;
+
+    const targetDilation = isChasing ? 0.96 : st.annoyance > 0.35 ? 0.72 : 0.34;
+    st.pupilDilation += (targetDilation - st.pupilDilation) * Math.min(1, clampedDt * 7.0);
+
+    const targetSquint = isChasing
+      ? 0.0
+      : Math.max(blinkVal, this.isSelfGrooming ? 0.82 : st.contentment * 0.85 + 0.14);
+    st.eyeSquint += (targetSquint - st.eyeSquint) * Math.min(1, clampedDt * 12.0);
+
+    const effPaw = Math.max(targetPawReach, Math.max(0, st.pounceOffset * 18.0));
+    st.pawReach += (effPaw - st.pawReach) * Math.min(1, clampedDt * 10.0);
 
     const finalTargetYaw = this.isSelfGrooming ? targetGroomYaw : targetYaw;
     const yawLimit = this.isSelfGrooming ? 0.95 : 0.65;

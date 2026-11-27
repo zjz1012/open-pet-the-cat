@@ -117,10 +117,9 @@ void main() {
     vec2 strokeDir = strokeMag > 0.015 ? strokeVec / strokeMag : vec2(1.0, 0.0);
     float strength = clamp(0.42 + strokeMag * 0.95, 0.42, 1.0) * combMask;
     if (strokeDir.x < -0.22) {
-      // AGAINST-GRAIN COMBING ("逆梳炸毛"): ruffle fur chaotically backward & outward!
-      float chaos = sin(vUv.x * 190.0 + vUv.y * 130.0) * 0.75;
-      vec2 ruffled = normalize(vec2(-1.0, chaos + combParting * 0.65));
-      flow = mix(flow, ruffled * 0.95, min(1.0, uDt * 30.0 * strength));
+      // AGAINST-GRAIN COMBING ("逆梳炸毛"): cleanly lift fur backward/outward (smooth coherent vector, ZERO polka-dot noise!)
+      vec2 ruffled = normalize(vec2(-0.92, clamp(hp.y * 4.0, -0.65, 0.65)));
+      flow = mix(flow, ruffled * 0.85, min(1.0, uDt * 26.0 * strength));
     } else {
       // WITH-GRAIN COMBING: gentle, silky, realistic parallel fur tracks (no corrugated extremes!)
       vec2 targetFlow = strokeDir * (0.48 + 0.18 * combGrooveVal) + vec2(0.0, combParting * 0.36);
@@ -186,7 +185,15 @@ uniform float uAspect;
 uniform float uNight;
 uniform float uRain;
 
-// Cat proportions & live physics
+// Cat proportions, whole-body 360° locomotion & live physics
+uniform vec2 uCatPos;
+uniform float uCatHeading;
+uniform float uSpineBend;
+uniform float uWalkPhase;
+uniform float uWalkAmp;
+uniform float uPupilDilation;
+uniform float uEyeSquint;
+uniform float uPawReach;
 uniform float uCatSize;
 uniform float uTorsoWidth;
 uniform float uBreath;
@@ -271,7 +278,8 @@ float sdEarTriangle(vec2 p, float w, float h) {
 }
 
 vec2 stageToCat(vec2 uv) {
-  return vec2((uv.x - 0.525) * uAspect, uv.y - 0.545) / (uCatSize * 1.08);
+  vec2 d = vec2((uv.x - uCatPos.x) * uAspect, uv.y - uCatPos.y) / (uCatSize * 1.08);
+  return rot2d(d, -uCatHeading);
 }
 
 float texNoise(vec2 p) {
@@ -314,6 +322,7 @@ struct CatGeom {
   float sdf;
   float height;
   vec2 flow;
+  vec2 headLocal;
   float headMask;
   float earMask;
   float earInner;
@@ -325,8 +334,13 @@ struct CatGeom {
 CatGeom evalCat(vec2 rawP) {
   CatGeom g;
 
-  // Apply subtle forward hunter lunge/crouch when tracking laser dot
-  vec2 p = rawP + vec2(uPounceOffset * smoothstep(0.24, -0.22, rawP.x), 0.0);
+  // Apply flexible liquid-cat spine curvature while turning/spinning + subtle walking sway!
+  vec2 p = rawP;
+  p.y -= uSpineBend * (p.x * p.x) * 1.15;
+  p.y += sin(uWalkPhase + p.x * 7.5) * uWalkAmp * 0.012;
+
+  // Apply subtle forward hunter lunge/crouch when chasing laser dot
+  p.x += uPounceOffset * smoothstep(0.24, -0.22, p.x);
 
   // Subtle dorsal skin twitch shudder when rubbed roughly against the grain!
   if (abs(uSkinTwitch) > 0.002) {
@@ -344,18 +358,32 @@ CatGeom evalCat(vec2 rawP) {
   vec2 torsoDelta = vec2(p.x - clampedX, (p.y - 0.002) / widthFactor);
   float dTorso = length(torsoDelta) - spineProfile;
 
-  // 2) Head & cheeks rotated smoothly around neck pivot (keeps natural neck join, ZERO detached torso stump!)
+  // 2) Head & cheeks rotated smoothly around neck pivot
   vec2 neckPivot = vec2(-0.225, -0.008) + uGroomHeadShift;
   vec2 pHeadSpace = rot2d(p - neckPivot, -uHeadYaw) + vec2(-0.225, -0.008);
   vec2 headCenter = vec2(-0.302, -0.010);
   vec2 hp = pHeadSpace - headCenter;
+  g.headLocal = hp;
 
-  float cheekW = 0.102 + 0.012 * smoothstep(-0.04, 0.05, hp.x);
-  float dHead = length(vec2(hp.x / 1.08, hp.y / (cheekW / 0.102))) - 0.102;
-  float dMuzzle = length((hp - vec2(-0.075, 0.002)) / vec2(0.055, 0.052)) - 0.65;
-  dHead = smin(dHead, dMuzzle * 0.052, 0.028);
+  float cheekW = 0.102 + 0.014 * smoothstep(-0.04, 0.05, hp.x);
+  float dHead = length(vec2(hp.x / 1.12, hp.y / (cheekW / 0.102))) - 0.102;
+  float dMuzzle = length((hp - vec2(-0.082, 0.002)) / vec2(0.054, 0.050)) - 0.68;
+  dHead = smin(dHead, dMuzzle * 0.050, 0.028);
 
-  float dBody = smin(dTorso, dHead, 0.048);
+  // Cute front paws peeking out when scampering or pouncing at the red laser dot!
+  float dPaws = 1e5;
+  float pawShow = max(uPawReach, uWalkAmp * 0.65);
+  if (pawShow > 0.04) {
+    float strideL = sin(uWalkPhase) * uWalkAmp * 0.025;
+    float strideR = -strideL;
+    vec2 lPawPos = vec2(-0.35 - pawShow * 0.065 + strideL, -0.072);
+    vec2 rPawPos = vec2(-0.35 - pawShow * 0.065 + strideR,  0.058);
+    float dLP = length((p - lPawPos) / vec2(0.044, 0.025)) - 1.0;
+    float dRP = length((p - rPawPos) / vec2(0.044, 0.025)) - 1.0;
+    dPaws = min(dLP, dRP) * 0.026;
+  }
+
+  float dBody = smin(min(dTorso, dPaws), dHead, 0.046);
 
   // 3) Left & Right Ears (rotate with head yaw + react independently to squish/airplane/laser!)
   vec2 lEarBase = headCenter + vec2(-0.015 + uLeftEarSquish * 0.022, -0.068 - uLeftEarSquish * 0.014);
@@ -385,7 +413,9 @@ CatGeom evalCat(vec2 rawP) {
     float segD = sdSegment(p, uTail[i], uTail[i + 1], st, tanVec);
     float globalT = (float(i) + st) / 12.0;
     float baseR = mix(0.041, 0.029, pow(globalT, 0.85));
-    float radius = baseR * (0.82 + 0.28 * uTailFluff);
+    // Iconic bottle-brush tail puffing during 炸毛 (piloerection)!
+    float bristleTailBoost = 1.0 + uRuffleLevel * 0.42 * sin(globalT * 2.8 + 0.3);
+    float radius = baseR * (0.82 + 0.28 * uTailFluff) * bristleTailBoost;
     radius *= 1.0 + 0.22 * sin(globalT * 3.14159) * max(0.0, uTailFluff - 0.9);
     float sd = segD - radius;
     if (sd < dTail) {
@@ -696,10 +726,12 @@ void main() {
   float bgRain = evalRainShadows(uv, 0.0);
   bgCol = applyAtmosphere(bgCol, bgBeam * 0.55, bgRain);
 
-  // 2) Dynamic Cat Contact & Cast Shadow on Cushion
+  // 2) Dynamic Cat Contact & Cast Shadow on Cushion (in world-light direction regardless of cat rotation!)
+  vec2 shadowDeltaLocal = rot2d(vec2(0.032, 0.042), -uCatHeading);
+  vec2 shadowFarLocal = rot2d(vec2(0.052, 0.064), -uCatHeading);
   CatGeom gHere = evalCat(catP);
-  CatGeom gShadow = evalCat(catP - vec2(0.032, 0.042));
-  CatGeom gShadowFar = evalCat(catP - vec2(0.052, 0.064));
+  CatGeom gShadow = evalCat(catP - shadowDeltaLocal);
+  CatGeom gShadowFar = evalCat(catP - shadowFarLocal);
   float contactAO = smoothstep(0.048, -0.015, gHere.sdf);
   float castShad = smoothstep(0.064, -0.016, gShadow.sdf);
   float softCast = smoothstep(0.095, -0.010, gShadowFar.sdf);
@@ -805,33 +837,31 @@ void main() {
       }
     } else {
       // 20-LAYER VOLUMETRIC 2.5D FUR SHELL MARCH
-      // Bristled/puffed fur ("炸毛"): puffs fine spiky hair fibers outward & reverses grain (ZERO blobby artifacts!)
-      float bristleZone = smoothstep(-0.24, -0.06, catP.x) * (1.0 - gHere.tailMask * 0.4);
+      // Real cat piloerection ("炸毛"): coherent outward-fanned spiky hairs + puffed dorsal ridge + bottle-brush tail!
+      // ZERO swirling noise jitter so strands NEVER turn into blobby spots!
+      float bristleZone = smoothstep(-0.24, -0.06, catP.x);
       float localRuffle = clamp(uRuffleLevel * bristleZone, 0.0, 1.0);
 
       float localLen = uFurLength
         * mix(1.0, 0.46, gHere.headMask)
         * mix(1.0, 0.38, gHere.earMask)
         * (1.0 + gHere.ruffMask * 0.55 * uRuffFluff)
-        * (1.0 + localRuffle * 0.32)
-        * mix(1.0, max(0.75, uTailFluff), gHere.tailMask);
+        * (1.0 + localRuffle * 0.48)
+        * mix(1.0, max(0.75, uTailFluff) * (1.0 + uRuffleLevel * 0.35), gHere.tailMask);
 
       vec2 baseFlow = gHere.flow;
       vec2 combLocal = vec2(comb.x, comb.y);
-      // Fine high-frequency spiky hair-strand deflection (uses channel R/G fine fibers, NEVER blobby B!)
-      vec2 ruffleJitter = (vec2(
-        texture(uNoiseTex, catP * 11.5 + 0.13).r,
-        texture(uNoiseTex, catP * 11.5 + 0.67).g
-      ) - 0.5) * 1.15 * localRuffle;
+      // Coherent outward/backward piloerection fanning away from the spine (crisp individual hairs standing on end!)
+      vec2 outwardFan = normalize(vec2(-0.55, sign(catP.y + 0.0001) * (0.45 + smoothstep(0.0, 0.14, abs(catP.y)) * 0.75)));
+      vec2 effDir = normalize(mix(baseFlow, outwardFan, localRuffle * 0.78) + combLocal * 0.95 + vec2(1e-4, 0.0));
 
-      vec2 effDir = normalize(baseFlow + combLocal * 1.15 + ruffleJitter - vec2(localRuffle * 1.10, 0.0) + vec2(1e-4, 0.0));
-      float againstGrain = clamp(-dot(baseFlow, combLocal) + localRuffle * 0.80, 0.0, 1.0);
+      float againstGrain = clamp(-dot(baseFlow, combLocal) + localRuffle * 0.72, 0.0, 1.0);
       float combAmount = length(combLocal);
       float ridgeCrest = max(0.0, -combPartDiv) * (1.0 - againstGrain * 0.8);
       float toothTrough = max(0.0, combPartDiv) * (1.0 - againstGrain * 0.8);
       float groomedSheenBoost = combAmount * (0.16 + ridgeCrest * 0.34) * (1.0 - againstGrain * 0.85);
-      // Keep fur strands crisp & fine even when ruffled (never cottage-cheese blobby!)
-      float effClump = clamp(uFurClump + localRuffle * 0.06 - ridgeCrest * 0.14, 0.12, 0.85);
+      // Lower clumping slightly when bristled so individual fine hairs separate crisply like electrified fur!
+      float effClump = clamp(uFurClump - localRuffle * 0.18 - ridgeCrest * 0.12, 0.08, 0.82);
 
       vec3 accumCol = vec3(0.0);
       float accumAlpha = 0.0;
@@ -842,59 +872,58 @@ void main() {
 
         float h = float(i) / float(LAYERS - 1);
         float overhang = h * (0.011 + localLen * 0.032);
-        // Keep geometric silhouette offset strictly bounded & natural (never spikes outside cat!)
         vec2 pLayer = catP
           - effDir * overhang
-          - combLocal * (h * 0.008 * insideCat)
+          - combLocal * (h * 0.007 * insideCat)
           + vec2(surfNormal.x, surfNormal.y) * (h * 0.007);
 
         CatGeom gLayer = evalCat(pLayer);
-        float edgeSlack = h * (0.005 + localLen * 0.015);
+        float edgeSlack = h * (0.005 + localLen * 0.016);
         if (gLayer.sdf > edgeSlack) continue;
 
         float bodyCov = smoothstep(edgeSlack, -0.008, gLayer.sdf);
-        // Shift fiber texture slightly more along combLocal for crisp hair-strand tracking without smearing coat colors!
-        vec2 fiberPos = pLayer - combLocal * (h * 0.011) + vec2(h * 0.012, -h * 0.009);
+        vec2 fiberPos = pLayer - combLocal * (h * 0.010) + vec2(h * 0.012, -h * 0.009);
         float fiber = sampleFurFiber(fiberPos, effDir, effClump);
 
         float layerAlpha;
         if (i == 0) {
           layerAlpha = bodyCov;
         } else {
-          // Subtle silky parting in comb troughs + spiky open tufts when bristled (炸毛)!
-          float troughParting = toothTrough * h * 0.13 + localRuffle * h * 0.12;
-          float threshold = h * (0.76 - againstGrain * 0.06) + troughParting;
-          float strand = smoothstep(threshold, threshold + 0.23, fiber);
+          // Crisp separated spiky tips when bristled (higher tip sharpening, zero blobs!)
+          float troughParting = toothTrough * h * 0.13 + localRuffle * h * 0.08;
+          float threshold = h * (0.76 + localRuffle * 0.06) + troughParting;
+          float strand = smoothstep(threshold, threshold + mix(0.23, 0.16, localRuffle), fiber);
           float edgeSoft = mix(0.62, 1.0, smoothstep(0.006, -0.025, gLayer.sdf));
           layerAlpha = strand * bodyCov * edgeSoft * (0.34 + 0.28 * (1.0 - h));
         }
 
         if (layerAlpha < 0.004) continue;
 
-        // Anchor coat pattern color near natural hair root so calico/tabby spots NEVER melt/stretch!
         vec2 pCoat = catP - baseFlow * (overhang * 0.65) - combLocal * (h * 0.004 * insideCat);
         vec3 coat = evalCoatColor(pCoat, gLayer);
-        float rootAO = mix(0.36, 1.06, pow(h, 0.62));
+        float coatLum = dot(coat, vec3(0.299, 0.587, 0.114));
+        // Keep bright coats (White / Ragdoll / Cream) luminous & fluffy in shaded flanks (not muddy dark grey!)
+        float rootFloor = mix(0.36, 0.54, smoothstep(0.55, 0.90, coatLum));
+        float rootAO = mix(rootFloor, 1.06, pow(h, 0.62));
         float pressAO = 1.0 - indent * mix(0.44, 0.20, h) - toothTrough * mix(0.22, 0.09, h);
-        float bellyAO = 0.70 + 0.30 * smoothstep(0.0, 0.36, gLayer.height);
+        float bellyAO = mix(0.72, 0.84, smoothstep(0.55, 0.90, coatLum)) + mix(0.28, 0.16, smoothstep(0.55, 0.90, coatLum)) * smoothstep(0.0, 0.36, gLayer.height);
 
-        vec3 tuftN = normalize(surfNormal + vec3((fiber - 0.5) * (0.45 + localRuffle * 0.35) * effDir, 0.0));
+        vec3 tuftN = normalize(surfNormal + vec3((fiber - 0.5) * 0.42 * effDir, 0.0));
         float ndl = dot(tuftN, lightDir);
-        float wrapDiff = clamp((ndl + 0.55) / 1.55, 0.0, 1.0);
+        float wrapDiff = clamp((ndl + 0.58) / 1.58, 0.0, 1.0);
 
-        vec3 tangent3 = normalize(vec3(effDir * (0.85 - againstGrain * 0.28), 0.32 + againstGrain * 0.42));
+        vec3 tangent3 = normalize(vec3(effDir * (0.85 - againstGrain * 0.25), 0.32 + againstGrain * 0.38));
         float tdh = dot(tangent3, halfVec);
         float sinTH = sqrt(max(0.0, 1.0 - tdh * tdh));
-        float coatLum = dot(coat, vec3(0.299, 0.587, 0.114));
         float sheenScale = mix(0.45, 1.0, smoothstep(0.04, 0.35, coatLum));
         float sheenSpec = pow(sinTH, 16.0) * (uSheen + groomedSheenBoost) * sheenScale * (0.10 + 0.18 * h) * (0.35 + 0.65 * wrapDiff);
-        float rim = pow(1.0 - max(0.0, tuftN.z), 2.8) * h * (0.12 + localRuffle * 0.10) * smoothstep(0.008, -0.015, gLayer.sdf);
+        float rim = pow(1.0 - max(0.0, tuftN.z), 2.6) * h * (0.12 + localRuffle * 0.14) * smoothstep(0.008, -0.015, gLayer.sdf);
 
-        vec3 bounce = mix(vec3(0.12, 0.095, 0.07), vec3(0.035, 0.055, 0.10), max(uNight, uRain * 0.45)) * (1.0 - wrapDiff) * (0.5 + 0.5 * h);
+        vec3 bounce = mix(vec3(0.14, 0.115, 0.09), vec3(0.035, 0.055, 0.10), max(uNight, uRain * 0.45)) * (1.0 - wrapDiff) * (0.5 + 0.5 * h);
         float catBeam = evalWindowLight(uv, (gLayer.height - indent * 0.28) * 0.52);
         float catRain = evalRainShadows(uv, (gLayer.height - indent * 0.28) * 0.52);
 
-        vec3 litFur = coat * (0.32 + 0.76 * wrapDiff + ridgeCrest * h * 0.06) * rootAO * pressAO * bellyAO
+        vec3 litFur = coat * (0.36 + 0.72 * wrapDiff + ridgeCrest * h * 0.06) * rootAO * pressAO * bellyAO
           + mix(vec3(1.0, 0.96, 0.90), vec3(0.75, 0.86, 1.0), max(uNight, uRain * 0.5)) * (sheenSpec + rim * (0.35 + 0.65 * catBeam))
           + coat * bounce;
 
@@ -907,6 +936,92 @@ void main() {
       }
 
       sceneCol = sceneCol * (1.0 - accumAlpha) + accumCol;
+    }
+
+    // 3.5) Cute Realistic Top-Down Feline Face (Expressive Eyes, Dilating Pupils, Button Nose & Whiskers!)
+    if (gHere.headMask > 0.02 || length(gHere.headLocal) < 0.18) {
+      vec2 hp = gHere.headLocal;
+      // Rotate world light slightly into head frame for realistic glossy eye catchlight
+      float faceMask = smoothstep(0.02, -0.025, gHere.sdf);
+
+      // A) Expressive Almond Cat Eyes (squint into happy slits when petted; huge dilated pupils when chasing laser!)
+      vec3 irisCol = (uPatternType == 5 || uPatternType == 6)
+        ? vec3(0.46, 0.72, 0.94)  // Sapphire blue for Siamese & Ragdoll
+        : (uPatternType == 0 || uPatternType == 1 || uPatternType == 2 || uPatternType == 4)
+        ? vec3(0.84, 0.64, 0.22)  // Warm amber-gold for Black / Orange / Calico / Tortie
+        : vec3(0.48, 0.74, 0.44); // Soft emerald-green for White / Silver / Grey / Sphynx
+
+      for (int side = -1; side <= 1; side += 2) {
+        float sy = float(side);
+        vec2 eyeCenter = vec2(-0.072, sy * 0.038);
+        vec2 ep = rot2d(hp - eyeCenter, -sy * 0.28);
+        // Squint flattens eye opening vertically into adorable crescent/slit
+        float openX = mix(0.017, 0.0038, uEyeSquint);
+        float openY = 0.022;
+        float eyeDist = length(vec2(ep.x / openX, ep.y / openY));
+
+        // Soft dark lash / eyelid rim framing the eye naturally against fur
+        float lidMask = smoothstep(1.32, 0.96, eyeDist) * faceMask;
+        vec3 lidCol = applyAtmosphere(vec3(0.09, 0.07, 0.07), bgBeam * 0.4, bgRain);
+        sceneCol = mix(sceneCol, lidCol, lidMask * (0.48 + 0.34 * uEyeSquint));
+
+        if (uEyeSquint < 0.88 && eyeDist < 1.0) {
+          float eyeCov = smoothstep(1.0, 0.72, eyeDist) * (1.0 - smoothstep(0.76, 0.92, uEyeSquint)) * faceMask;
+          // Subtle iris depth gradient
+          float irisGrad = 0.72 + 0.38 * smoothstep(0.95, 0.2, eyeDist);
+          vec3 eyeCol = irisCol * irisGrad;
+
+          // Dynamic pupil: vertical feline slit when relaxed -> huge dark hunter circle when chasing laser!
+          float pW = mix(0.28, 0.74, uPupilDilation);
+          float pH = mix(0.76, 0.80, uPupilDilation);
+          float pupilDist = length(vec2(ep.x / (openX * pW), ep.y / (openY * pH)));
+          float pupilCov = smoothstep(1.0, 0.72, pupilDist);
+          eyeCol = mix(eyeCol, vec3(0.03, 0.03, 0.04), pupilCov);
+
+          // Crisp sunlit window catchlight glint makes the cat's eyes look genuinely ALIVE!
+          float glint1 = exp(-dot((ep - vec2(-openX * 0.28, -openY * 0.24)) / vec2(0.0045, 0.0055), (ep - vec2(-openX * 0.28, -openY * 0.24)) / vec2(0.0045, 0.0055)));
+          float glint2 = exp(-dot((ep - vec2(openX * 0.25, openY * 0.26)) / vec2(0.0025, 0.003), (ep - vec2(openX * 0.25, openY * 0.26)) / vec2(0.0025, 0.003))) * 0.45;
+          eyeCol = applyAtmosphere(eyeCol, bgBeam * 0.5, bgRain) + vec3(0.95, 0.97, 1.0) * (glint1 * 0.92 + glint2);
+
+          sceneCol = mix(sceneCol, eyeCol, eyeCov);
+        }
+      }
+
+      // B) Cute Tiny Glossy Button Nose at Muzzle Tip!
+      vec2 np = hp - vec2(-0.107, 0.002);
+      // Soft rounded triangular feline nose leather
+      float noseSdf = length(vec2((np.x + 0.002) / 0.010, np.y / (0.013 - np.x * 0.25))) - 1.0;
+      float noseCov = smoothstep(0.18, -0.18, noseSdf) * faceMask;
+      if (noseCov > 0.005) {
+        float isDarkNose = (uPatternType == 0 && dot(uPrimaryColor, vec3(1.0)) < 0.5) || uPatternType == 5 ? 1.0 : 0.0;
+        vec3 noseBase = mix(vec3(0.76, 0.46, 0.47), vec3(0.13, 0.11, 0.12), isDarkNose);
+        float noseHighlight = exp(-dot((np - vec2(-0.003, -0.003)) / vec2(0.0045, 0.005), (np - vec2(-0.003, -0.003)) / vec2(0.0045, 0.005))) * 0.45;
+        vec3 noseCol = applyAtmosphere(noseBase, bgBeam * 0.5, bgRain) + vec3(0.95, 0.92, 0.90) * noseHighlight;
+        sceneCol = mix(sceneCol, noseCol, noseCov * 0.92);
+      }
+
+      // C) Delicate Curved Whiskers Fanning Out from Both Cheeks!
+      float whiskerAlpha = 0.0;
+      for (int side = -1; side <= 1; side += 2) {
+        float sy = float(side);
+        vec2 wp = hp - vec2(-0.095, sy * 0.026);
+        wp.y *= sy; // Mirror cleanly for left & right cheeks
+        if (wp.y > 0.0 && wp.y < 0.145 && wp.x > -0.08 && wp.x < 0.09) {
+          for (int w = 0; w < 3; w++) {
+            float fw = float(w) - 1.0; // -1, 0, +1
+            // Graceful gentle backward curve along each whisker
+            float curveX = fw * 0.016 + wp.y * (0.14 + fw * 0.20) + wp.y * wp.y * 1.15;
+            float distW = abs(wp.x - curveX);
+            float taper = smoothstep(0.135 - abs(fw) * 0.018, 0.008, wp.y) * smoothstep(0.004, 0.018, wp.y);
+            float line = smoothstep(0.0024, 0.0005, distW) * taper;
+            whiskerAlpha = max(whiskerAlpha, line);
+          }
+        }
+      }
+      if (whiskerAlpha > 0.01) {
+        vec3 whiskCol = applyAtmosphere(vec3(0.96, 0.94, 0.90), bgBeam * 0.65, bgRain);
+        sceneCol = mix(sceneCol, whiskCol, whiskerAlpha * 0.62);
+      }
     }
   }
 
