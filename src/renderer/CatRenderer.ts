@@ -168,6 +168,8 @@ export class CatRenderer {
     gl.uniform1i(this.simUniforms.uToolMode, toolIdx);
     gl.uniform2f(this.simUniforms.uPatPos, state.patPos.x, state.patPos.y);
     gl.uniform1f(this.simUniforms.uPatImpulse, state.patImpulse);
+    gl.uniform2f(this.simUniforms.uLickPos, state.lickPos.x, state.lickPos.y);
+    gl.uniform1f(this.simUniforms.uLickStrength, state.lickStrength);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     this.simIndex = 1 - this.simIndex;
@@ -211,6 +213,8 @@ export class CatRenderer {
     gl.uniform1f(this.sceneUniforms.uHeadPress, state.headPress);
     gl.uniform1f(this.sceneUniforms.uRumpLift, state.rumpLift);
     gl.uniform1f(this.sceneUniforms.uHeadYaw, state.headYaw);
+    gl.uniform2f(this.sceneUniforms.uGroomHeadShift, state.groomHeadShift.x, state.groomHeadShift.y);
+    gl.uniform1f(this.sceneUniforms.uRuffleLevel, state.ruffleLevel);
     gl.uniform1f(this.sceneUniforms.uPounceOffset, state.pounceOffset);
     gl.uniform1f(this.sceneUniforms.uSkinTwitch, state.skinTwitch);
 
@@ -266,7 +270,7 @@ export class CatRenderer {
     const simNames = [
       'uPrevSim', 'uTexelSize', 'uDt', 'uAspect',
       'uHandPos', 'uHandVel', 'uHandAngle', 'uHandPress', 'uHandVisible', 'uCatSize',
-      'uToolMode', 'uPatPos', 'uPatImpulse',
+      'uToolMode', 'uPatPos', 'uPatImpulse', 'uLickPos', 'uLickStrength',
     ];
     for (const name of simNames) {
       this.simUniforms[name] = gl.getUniformLocation(this.simProgram, name);
@@ -278,7 +282,7 @@ export class CatRenderer {
       'uTime', 'uAspect', 'uNight', 'uRain',
       'uCatSize', 'uTorsoWidth', 'uBreath',
       'uLeftEarSquish', 'uRightEarSquish', 'uHeadPress', 'uRumpLift',
-      'uHeadYaw', 'uPounceOffset', 'uSkinTwitch', 'uTail',
+      'uHeadYaw', 'uGroomHeadShift', 'uRuffleLevel', 'uPounceOffset', 'uSkinTwitch', 'uTail',
       'uPatternType', 'uPrimaryColor', 'uSecondaryColor', 'uTertiaryColor', 'uEarInnerColor',
       'uFurLength', 'uFurClump', 'uSheen', 'uPatternSeed', 'uTailFluff', 'uRuffFluff',
       'uToolMode', 'uHandPos', 'uHandAngle', 'uHandPress', 'uHandVisible',

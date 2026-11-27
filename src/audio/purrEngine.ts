@@ -33,6 +33,7 @@ export class PurrEngine {
   private dropletTimer = 0;
   private lastMeowTime = -10;
   private lastHissTime = -10;
+  private lastLickTime = -10;
 
   public isEnabled(): boolean {
     return this.enabled;
@@ -364,6 +365,40 @@ export class PurrEngine {
 
     src.start(now);
     src.stop(now + 0.38);
+  }
+
+  /** Soft raspy ASMR cat-tongue licking sound while self-grooming ruffled fur */
+  public playLickSound(): void {
+    if (!this.enabled || !this.initialized || !this.ctx || !this.masterGain) return;
+    if (this.ctx.state !== 'running') return;
+    const now = this.ctx.currentTime;
+    if (now - this.lastLickTime < 0.32) return;
+    this.lastLickTime = now;
+
+    const ctx = this.ctx;
+    const buf = this.createNoiseBuffer(ctx, 0.22, 'pink');
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+
+    // Raspy feline papillae sweep across fur (1400 Hz -> 2500 Hz -> 1600 Hz)
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(1450, now);
+    bp.frequency.exponentialRampToValueAtTime(2450, now + 0.11);
+    bp.frequency.exponentialRampToValueAtTime(1550, now + 0.19);
+    bp.Q.value = 1.9;
+
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, now);
+    env.gain.linearRampToValueAtTime(0.11, now + 0.045);
+    env.gain.exponentialRampToValueAtTime(0.0001, now + 0.20);
+
+    src.connect(bp);
+    bp.connect(env);
+    env.connect(this.masterGain);
+
+    src.start(now);
+    src.stop(now + 0.21);
   }
 
   private playRainDroplet(): void {

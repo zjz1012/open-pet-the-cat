@@ -716,6 +716,12 @@ function initApp(): void {
         purr.playHiss();
         showToast('逆毛搓太狠炸毛啦！顺着毛轻轻摸~ 😾', 1800);
       }
+      if (events.startedSelfGroom) {
+        showToast('毛被梳炸啦，小猫正在自己低头舔毛理顺… 👅', 2400);
+      }
+      if (events.lickStroke) {
+        purr.playLickSound();
+      }
       if (events.furballSpawned) {
         showToast('梳出一团软乎乎的浮毛球，可以拨着玩 🧶', 1800);
       }

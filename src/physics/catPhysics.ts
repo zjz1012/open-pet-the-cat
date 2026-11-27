@@ -30,6 +30,10 @@ export interface PhysicsEvents {
   hissPushback: boolean;
   /** Triggered when grooming spawns a new shedding furball */
   furballSpawned: boolean;
+  /** Triggered once when cat begins licking its own ruffled fur back smooth */
+  startedSelfGroom: boolean;
+  /** Triggered on each individual tongue lick stroke during self-grooming */
+  lickStroke: boolean;
 }
 
 export interface CatPhysicsState {
@@ -39,6 +43,8 @@ export interface CatPhysicsState {
   contentment: number;
   /** 0..1 feline irritability from rough against-grain rubbing / tail yanking */
   annoyance: number;
+  /** 0..1 ruffled/bristled fur level ("炸毛") caused by combing/petting against the grain */
+  ruffleLevel: number;
   /** 0..1 sudden feline dorsal skin twitch ripple */
   skinTwitch: number;
   /** Cat size scale 0.65..1.14 */
@@ -49,8 +55,13 @@ export interface CatPhysicsState {
   rightEarSquish: number;
   headPress: number;
   rumpLift: number;
-  /** Head yaw angle (radians) when tracking laser pointer */
+  /** Head yaw angle (radians) when tracking laser OR turning to groom shoulder */
   headYaw: number;
+  /** Gentle head shift in cat-local coords during self-grooming lean */
+  groomHeadShift: Vec2;
+  /** Stage UV & strength of the cat's own grooming smoothing ruffled fur in SIM_FRAG */
+  lickPos: Vec2;
+  lickStrength: number;
   /** Forward crouch/pounce lunge when chasing laser dot (-0.02..+0.04) */
   pounceOffset: number;
   /** Active bongo butt-pat jelly ripple impulse */
@@ -104,13 +115,21 @@ export class CatPhysics {
   private headYawVel = 0;
   private pounceVel = 0;
 
-  // Mood, twitch, hiss pushback & bongo-pat state
+  // Mood, twitch, hiss pushback, bongo-pat & self-grooming state
   private pushbackTimer = 0;
   private twitchPhase = 0;
   private patCombo = 0;
   private patComboTimer = 0;
   private happyStreak = 0;
   private pounceCooldown = 0;
+
+  // Self-grooming (licking ruffled fur smooth!)
+  private idleSinceRuffle = 0;
+  private isSelfGrooming = false;
+  private groomSide = 1; // -1 = top flank, +1 = bottom flank
+  private groomPhase = 0;
+  private lastLickIdx = -1;
+  private groomShiftVel: Vec2 = { x: 0, y: 0 };
 
   // Grooming shedding accumulator
   private shedAccumulator = 0;
@@ -132,6 +151,7 @@ export class CatPhysics {
       breath: 0,
       contentment: 0,
       annoyance: 0,
+      ruffleLevel: 0,
       skinTwitch: 0,
       catSize: 1.0,
       torsoWidth: 1.0,
@@ -140,6 +160,9 @@ export class CatPhysics {
       headPress: 0,
       rumpLift: 0,
       headYaw: 0,
+      groomHeadShift: { x: 0, y: 0 },
+      lickPos: { x: 0.45, y: 0.54 },
+      lickStrength: 0,
       pounceOffset: 0,
       patPos: { x: 0.62, y: 0.54 },
       patImpulse: 0,
@@ -334,6 +357,8 @@ export class CatPhysics {
       softMeow: false,
       hissPushback: false,
       furballSpawned: false,
+      startedSelfGroom: false,
+      lickStroke: false,
     };
 
     // Decay transient impulse timers
@@ -419,24 +444,53 @@ export class CatPhysics {
     const normSpeed = Math.min(1.0, speedMag * 0.75);
     st.strokeSpeed += ((st.isOverCat ? normSpeed : 0) - st.strokeSpeed) * Math.min(1, clampedDt * 7);
 
-    // 3) Feline Mood System (Contentment vs. Against-Grain Irritability & Skin Twitch!)
+    // 3) Feline Mood, Against-Grain Bristling ("炸毛") & Self-Grooming Licking!
     const isActivelyPetting = st.isOverCat && (st.handPress > 0.25 || speedMag > 0.06);
-    // Natural torso fur grows left -> right (+X). Rubbing briskly right -> left (-X) is against the grain!
-    const againstGrainStroke =
+    // Natural torso fur grows left -> right (+X).
+    // Combing or rubbing right -> left (-X) is AGAINST the grain -> bristles fur (炸毛)!
+    const againstGrainComb =
+      isActivelyPetting &&
+      st.toolMode === 'comb' &&
+      (hit.zone === 'back' || hit.zone === 'rump') &&
+      st.handVel.x < -0.14 &&
+      st.handPress > 0.35;
+    const againstGrainHand =
       isActivelyPetting &&
       st.toolMode === 'hand' &&
       (hit.zone === 'back' || hit.zone === 'rump') &&
-      st.handVel.x < -0.28 &&
-      st.handPress > 0.55;
+      st.handVel.x < -0.26 &&
+      st.handPress > 0.50;
+    const againstGrainStroke = againstGrainComb || againstGrainHand;
+    const withGrainStroke =
+      isActivelyPetting &&
+      (hit.zone === 'back' || hit.zone === 'rump') &&
+      st.handVel.x > 0.14 &&
+      st.handPress > 0.35;
     const tailYank =
       isActivelyPetting && hit.zone === 'tail' && speedMag > 0.35 && st.handPress > 0.55;
 
+    // Interrupt self-grooming immediately if user touches the cat or turns on the laser
+    if (isActivelyPetting || st.laserVisible > 0.25) {
+      this.isSelfGrooming = false;
+      this.idleSinceRuffle = 0;
+    }
+
+    // Build or smooth fur ruffle level ("炸毛")
+    if (againstGrainStroke && furLength > 0.05) {
+      const ruffleRate = againstGrainComb ? 1.35 : 0.78;
+      st.ruffleLevel = Math.min(1.0, st.ruffleLevel + clampedDt * ruffleRate);
+      this.groomSide = localHand.y >= 0 ? 1 : -1;
+      this.idleSinceRuffle = 0;
+    } else if (withGrainStroke) {
+      // Combing or stroking WITH the grain also smooths ruffled fur!
+      st.ruffleLevel = Math.max(0, st.ruffleLevel - clampedDt * (st.toolMode === 'comb' ? 1.4 : 0.7));
+    }
+
     if ((againstGrainStroke || tailYank) && this.temperament !== 'angel') {
       const spicyMul = this.temperament === 'spicy' ? 1.75 : 1.0;
-      const rageRate = (tailYank ? 0.85 : 0.58) * spicyMul;
+      const rageRate = (tailYank ? 0.85 : againstGrainComb ? 0.72 : 0.58) * spicyMul;
       st.annoyance = Math.min(1.0, st.annoyance + clampedDt * rageRate);
-      // Trigger sudden cat dorsal skin twitch when rubbing against the grain!
-      if (st.annoyance > 0.25 && this.twitchPhase <= 0) {
+      if (st.annoyance > 0.24 && this.twitchPhase <= 0) {
         this.twitchPhase = 1.0;
       }
       if (st.annoyance >= 0.92 && this.pushbackTimer <= 0) {
@@ -445,9 +499,71 @@ export class CatPhysics {
         events.hissPushback = true;
       }
     } else {
-      const calmRate = this.temperament === 'angel' ? 1.6 : isActivelyPetting ? 0.28 : 0.42;
+      const calmRate = this.temperament === 'angel' ? 1.6 : isActivelyPetting ? 0.28 : 0.45;
       st.annoyance = Math.max(0, st.annoyance - clampedDt * calmRate);
     }
+
+    // Trigger adorable self-grooming after user stops messing with ruffled fur for ~0.85s!
+    if (!isActivelyPetting && st.laserVisible < 0.2 && st.ruffleLevel > 0.26) {
+      this.idleSinceRuffle += clampedDt;
+      if (!this.isSelfGrooming && this.idleSinceRuffle > 0.85) {
+        this.isSelfGrooming = true;
+        this.groomPhase = 0;
+        this.lastLickIdx = -1;
+        events.startedSelfGroom = true;
+      }
+    }
+
+    // Step self-grooming animation: realistic top-down head turn & rhythmic shoulder-licking bob!
+    // Keeps head smoothly attached to neck with BOTH ears visible (no anatomical distortion!)
+    let targetGroomYaw = 0;
+    let targetGroomShiftX = 0;
+    let targetGroomShiftY = 0;
+    st.lickStrength = 0;
+
+    if (this.isSelfGrooming) {
+      this.groomPhase += clampedDt * 1.48; // ~0.68s per natural rhythmic lick
+      const lickIdx = Math.floor(this.groomPhase);
+      const frac = this.groomPhase - lickIdx;
+      const lickWave = Math.sin(Math.min(1, frac / 0.65) * Math.PI);
+      const isLickingNow = frac < 0.65;
+
+      if (isLickingNow && lickIdx !== this.lastLickIdx) {
+        this.lastLickIdx = lickIdx;
+        events.lickStroke = true;
+      }
+
+      // Natural overhead turn (~38°-52°) + gentle lean toward shoulder/flank — anatomically clean!
+      const side = this.groomSide;
+      targetGroomYaw = side * (0.64 + lickWave * 0.22);
+      targetGroomShiftX = 0.018 + lickWave * 0.014;
+      targetGroomShiftY = side * (0.026 + lickWave * 0.014);
+
+      // Smooth ruffled fur progressively across back/shoulders as the cat grooms itself
+      const lickLocal: Vec2 = {
+        x: -0.14 + frac * 0.28,
+        y: side * (0.03 + 0.02 * Math.sin(frac * 3.14)),
+      };
+      const lickStage = this.catLocalToStage(lickLocal, aspect);
+      st.lickPos.x = lickStage.x;
+      st.lickPos.y = lickStage.y;
+      st.lickStrength = isLickingNow ? lickWave : 0;
+
+      if (isLickingNow) {
+        st.ruffleLevel = Math.max(0, st.ruffleLevel - clampedDt * 0.42);
+      }
+      if (st.ruffleLevel <= 0.02 && frac > 0.72) {
+        st.ruffleLevel = 0;
+        this.isSelfGrooming = false;
+      }
+    } else if (!againstGrainStroke && st.ruffleLevel > 0) {
+      st.ruffleLevel = Math.max(0, st.ruffleLevel - clampedDt * 0.05);
+    }
+
+    this.groomShiftVel.x += ((targetGroomShiftX - st.groomHeadShift.x) * 48 - this.groomShiftVel.x * 9.5) * clampedDt;
+    this.groomShiftVel.y += ((targetGroomShiftY - st.groomHeadShift.y) * 48 - this.groomShiftVel.y * 9.5) * clampedDt;
+    st.groomHeadShift.x += this.groomShiftVel.x * clampedDt;
+    st.groomHeadShift.y += this.groomShiftVel.y * clampedDt;
 
     // Crisp damped high-frequency dorsal skin twitch envelope
     if (this.twitchPhase > 0) {
@@ -546,8 +662,10 @@ export class CatPhysics {
       }
     }
 
-    this.headYawVel += ((targetYaw - st.headYaw) * 65 - this.headYawVel * 10) * clampedDt;
-    st.headYaw = Math.max(-0.65, Math.min(0.65, st.headYaw + this.headYawVel * clampedDt));
+    const finalTargetYaw = this.isSelfGrooming ? targetGroomYaw : targetYaw;
+    const yawLimit = this.isSelfGrooming ? 0.95 : 0.65;
+    this.headYawVel += ((finalTargetYaw - st.headYaw) * 58 - this.headYawVel * 9.5) * clampedDt;
+    st.headYaw = Math.max(-yawLimit, Math.min(yawLimit, st.headYaw + this.headYawVel * clampedDt));
 
     this.pounceVel += ((targetPounce - st.pounceOffset) * 75 - this.pounceVel * 10.5) * clampedDt;
     st.pounceOffset = Math.max(-0.025, Math.min(0.055, st.pounceOffset + this.pounceVel * clampedDt));

@@ -33,9 +33,11 @@ uniform float uHandAngle;
 uniform float uHandPress;
 uniform float uHandVisible;
 uniform float uCatSize;
-uniform int uToolMode; // 0=hand, 1=comb, 2=laser, 3=paint
+uniform int uToolMode; // 0=hand, 1=comb, 2=laser
 uniform vec2 uPatPos;
 uniform float uPatImpulse;
+uniform vec2 uLickPos;
+uniform float uLickStrength;
 
 vec2 rot2d(vec2 p, float a) {
   float c = cos(a);
@@ -112,26 +114,40 @@ void main() {
   vec2 strokeVec = vec2(uHandVel.x * uAspect, uHandVel.y);
   float strokeMag = length(strokeVec);
   if (uToolMode == 1 && combMask > 0.001) {
-    // Even slow gentle combing leaves crisp sleek parallel tracks aligned with stroke (default +X along fur)!
     vec2 strokeDir = strokeMag > 0.015 ? strokeVec / strokeMag : vec2(1.0, 0.0);
-    float strength = clamp(0.45 + strokeMag * 1.1, 0.45, 1.0) * combMask;
-    // Flow X follows stroke sleekly; Flow Y parts fur symmetrically away from each comb tooth trough!
-    vec2 targetFlow = strokeDir * (0.72 + 0.25 * combGrooveVal) + vec2(0.0, combParting * 0.95);
-    flow = mix(flow, targetFlow, min(1.0, uDt * 34.0 * strength));
+    float strength = clamp(0.42 + strokeMag * 0.95, 0.42, 1.0) * combMask;
+    if (strokeDir.x < -0.22) {
+      // AGAINST-GRAIN COMBING ("逆梳炸毛"): ruffle fur chaotically backward & outward!
+      float chaos = sin(vUv.x * 190.0 + vUv.y * 130.0) * 0.75;
+      vec2 ruffled = normalize(vec2(-1.0, chaos + combParting * 0.65));
+      flow = mix(flow, ruffled * 0.95, min(1.0, uDt * 30.0 * strength));
+    } else {
+      // WITH-GRAIN COMBING: gentle, silky, realistic parallel fur tracks (no corrugated extremes!)
+      vec2 targetFlow = strokeDir * (0.48 + 0.18 * combGrooveVal) + vec2(0.0, combParting * 0.36);
+      flow = mix(flow, targetFlow, min(1.0, uDt * 24.0 * strength));
+    }
   } else if (combMask > 0.001 && strokeMag > 0.012) {
     vec2 strokeDir = strokeVec / (strokeMag + 0.0001);
     float strength = min(1.0, strokeMag * 0.95) * combMask;
-    vec2 targetFlow = strokeDir * min(1.0, 0.60 + strokeMag * 0.55);
+    vec2 targetFlow = strokeDir * min(1.0, 0.55 + strokeMag * 0.45);
     flow = mix(flow, targetFlow, min(1.0, uDt * 18.0 * strength));
   }
   if (uToolMode == 0 && contact > 0.18) {
     vec2 radial = normalize(hp + vec2(0.0001));
     vec2 worldRadial = rot2d(radial, uHandAngle);
-    flow = mix(flow, flow + worldRadial * 0.16, min(1.0, uDt * 2.8 * contact));
+    flow = mix(flow, flow + worldRadial * 0.14, min(1.0, uDt * 2.5 * contact));
   }
 
-  // Combed silk tracks linger visibly for ~7 seconds so you can admire your groomed cat!
-  float relaxRate = uToolMode == 1 ? 0.13 : 0.44;
+  // Self-grooming tongue lick physically smooths ruffled fur neatly back into +X sleekness!
+  if (uLickStrength > 0.01) {
+    vec2 ld = vUv - uLickPos;
+    ld.x *= uAspect;
+    float lickMask = exp(-dot(ld, ld) / 0.012) * uLickStrength;
+    flow = mix(flow, vec2(0.28, 0.0), min(1.0, uDt * 14.0 * lickMask));
+    indent = max(indent, lickMask * 0.22);
+  }
+
+  float relaxRate = uToolMode == 1 ? 0.16 : 0.42;
   flow *= exp(-uDt * relaxRate);
   float flowLen = length(flow);
   if (flowLen > 1.0) flow /= flowLen;
@@ -179,6 +195,8 @@ uniform float uRightEarSquish;
 uniform float uHeadPress;
 uniform float uRumpLift;
 uniform float uHeadYaw;
+uniform vec2 uGroomHeadShift;
+uniform float uRuffleLevel;
 uniform float uPounceOffset;
 uniform float uSkinTwitch;
 uniform vec2 uTail[13];
@@ -326,9 +344,9 @@ CatGeom evalCat(vec2 rawP) {
   vec2 torsoDelta = vec2(p.x - clampedX, (p.y - 0.002) / widthFactor);
   float dTorso = length(torsoDelta) - spineProfile;
 
-  // 2) Head & cheeks rotated smoothly around neck pivot by uHeadYaw (tracks red laser!)
-  vec2 neckPivot = vec2(-0.225, -0.008);
-  vec2 pHeadSpace = rot2d(p - neckPivot, -uHeadYaw) + neckPivot;
+  // 2) Head & cheeks rotated smoothly around neck pivot (keeps natural neck join, ZERO detached torso stump!)
+  vec2 neckPivot = vec2(-0.225, -0.008) + uGroomHeadShift;
+  vec2 pHeadSpace = rot2d(p - neckPivot, -uHeadYaw) + vec2(-0.225, -0.008);
   vec2 headCenter = vec2(-0.302, -0.010);
   vec2 hp = pHeadSpace - headCenter;
 
@@ -381,7 +399,8 @@ CatGeom evalCat(vec2 rawP) {
 
   g.headMask = smoothstep(0.045, -0.055, dHead);
   g.earMask = smoothstep(0.015, -0.012, dEars);
-  g.earInner = max(lInner, rInner) * g.earMask;
+  // Ensure inner ear pink recess ONLY appears on ears protruding cleanly outside the torso (never floating on back!)
+  g.earInner = max(lInner, rInner) * g.earMask * smoothstep(-0.025, 0.018, dTorso);
   g.tailMask = smoothstep(0.025, -0.022, dTail) * smoothstep(-0.02, 0.05, dTorso);
   g.ruffMask = exp(-pow((p.x + 0.22) / 0.085, 2.0)) * smoothstep(0.02, -0.04, dBody);
 
@@ -716,24 +735,27 @@ void main() {
   }
 
   // 3) Cat Surface + Multi-Layer 2.5D Fur Shell March
-  float furHalo = 0.032 + uFurLength * 0.048 * max(1.0, uTailFluff);
+  float furHalo = 0.030 + uFurLength * (0.044 + uRuffleLevel * 0.022) * max(1.0, uTailFluff);
   if (gHere.sdf < furHalo) {
     vec4 sim = texture(uSimTex, uv);
     float indent = sim.r;
-    vec2 comb = (sim.ba - 0.5) * 2.0;
+    // CRITICAL: Clamp combing displacement smoothly to ZERO outside the cat's silhouette
+    // so brushed fur NEVER spikes or stretches out onto the cushion!
+    float insideCat = smoothstep(0.006, -0.046, gHere.sdf);
+    vec2 comb = ((sim.ba - 0.5) * 2.0) * insideCat;
 
     vec2 epsUv = vec2(0.004 / uAspect, 0.004);
     float indR = texture(uSimTex, uv + vec2(epsUv.x, 0.0)).r;
     float indL = texture(uSimTex, uv - vec2(epsUv.x, 0.0)).r;
     float indB = texture(uSimTex, uv + vec2(0.0, epsUv.y)).r;
     float indT = texture(uSimTex, uv - vec2(0.0, epsUv.y)).r;
-    vec2 indentGrad = vec2(indR - indL, indB - indT) * 14.0;
+    vec2 indentGrad = vec2(indR - indL, indB - indT) * 12.0 * insideCat;
 
-    // Detect combed fur tooth parting troughs vs. raised silky fur ridges via Y-divergence of comb flow!
-    float combYTop = texture(uSimTex, uv - vec2(0.0, 0.005)).a * 2.0 - 1.0;
-    float combYBot = texture(uSimTex, uv + vec2(0.0, 0.005)).a * 2.0 - 1.0;
-    float combPartDiv = clamp((combYBot - combYTop) * 1.45, -1.0, 1.0); // >0 = tooth parting trough, <0 = raised sleek ridge!
-    float combRidgeSlope = clamp(comb.y * 1.35, -1.0, 1.0);
+    // Gentle combed parting troughs vs. soft silky fur ridges (strictly inside cat!)
+    float combYTop = (texture(uSimTex, uv - vec2(0.0, 0.005)).a * 2.0 - 1.0) * insideCat;
+    float combYBot = (texture(uSimTex, uv + vec2(0.0, 0.005)).a * 2.0 - 1.0) * insideCat;
+    float combPartDiv = clamp((combYBot - combYTop) * 0.95, -1.0, 1.0);
+    float combRidgeSlope = clamp(comb.y * 0.55, -1.0, 1.0);
 
     float eps = 0.006;
     float hR = evalCat(catP + vec2(eps, 0.0)).height;
@@ -743,7 +765,7 @@ void main() {
     vec2 bodyGrad = vec2(hR - hL, hB - hT) / (2.0 * eps);
     vec3 surfNormal = normalize(vec3(
       -bodyGrad.x * 0.38 + indentGrad.x,
-      -bodyGrad.y * 0.38 + indentGrad.y - combRidgeSlope * 0.42,
+      -bodyGrad.y * 0.38 + indentGrad.y - combRidgeSlope * 0.16,
       1.0
     ));
 
@@ -783,21 +805,33 @@ void main() {
       }
     } else {
       // 20-LAYER VOLUMETRIC 2.5D FUR SHELL MARCH
+      // Bristled/puffed fur ("炸毛"): puffs fine spiky hair fibers outward & reverses grain (ZERO blobby artifacts!)
+      float bristleZone = smoothstep(-0.24, -0.06, catP.x) * (1.0 - gHere.tailMask * 0.4);
+      float localRuffle = clamp(uRuffleLevel * bristleZone, 0.0, 1.0);
+
       float localLen = uFurLength
         * mix(1.0, 0.46, gHere.headMask)
         * mix(1.0, 0.38, gHere.earMask)
         * (1.0 + gHere.ruffMask * 0.55 * uRuffFluff)
+        * (1.0 + localRuffle * 0.32)
         * mix(1.0, max(0.75, uTailFluff), gHere.tailMask);
 
       vec2 baseFlow = gHere.flow;
       vec2 combLocal = vec2(comb.x, comb.y);
-      vec2 effDir = normalize(baseFlow + combLocal * 1.95 + vec2(1e-4, 0.0));
-      float againstGrain = clamp(-dot(baseFlow, combLocal), 0.0, 1.0);
+      // Fine high-frequency spiky hair-strand deflection (uses channel R/G fine fibers, NEVER blobby B!)
+      vec2 ruffleJitter = (vec2(
+        texture(uNoiseTex, catP * 11.5 + 0.13).r,
+        texture(uNoiseTex, catP * 11.5 + 0.67).g
+      ) - 0.5) * 1.15 * localRuffle;
+
+      vec2 effDir = normalize(baseFlow + combLocal * 1.15 + ruffleJitter - vec2(localRuffle * 1.10, 0.0) + vec2(1e-4, 0.0));
+      float againstGrain = clamp(-dot(baseFlow, combLocal) + localRuffle * 0.80, 0.0, 1.0);
       float combAmount = length(combLocal);
-      // Distinct silky brushed gloss on combed ridge crests & deeper parting in tooth troughs!
-      float ridgeCrest = max(0.0, -combPartDiv);
-      float toothTrough = max(0.0, combPartDiv);
-      float groomedSheenBoost = combAmount * (0.28 + ridgeCrest * 0.72);
+      float ridgeCrest = max(0.0, -combPartDiv) * (1.0 - againstGrain * 0.8);
+      float toothTrough = max(0.0, combPartDiv) * (1.0 - againstGrain * 0.8);
+      float groomedSheenBoost = combAmount * (0.16 + ridgeCrest * 0.34) * (1.0 - againstGrain * 0.85);
+      // Keep fur strands crisp & fine even when ruffled (never cottage-cheese blobby!)
+      float effClump = clamp(uFurClump + localRuffle * 0.06 - ridgeCrest * 0.14, 0.12, 0.85);
 
       vec3 accumCol = vec3(0.0);
       float accumAlpha = 0.0;
@@ -807,55 +841,60 @@ void main() {
         if (accumAlpha > 0.985) break;
 
         float h = float(i) / float(LAYERS - 1);
-        float overhang = h * (0.012 + localLen * 0.036);
+        float overhang = h * (0.011 + localLen * 0.032);
+        // Keep geometric silhouette offset strictly bounded & natural (never spikes outside cat!)
         vec2 pLayer = catP
           - effDir * overhang
-          - combLocal * (h * 0.022 * (0.65 + 0.65 * localLen))
-          + vec2(surfNormal.x, surfNormal.y) * (h * 0.008);
+          - combLocal * (h * 0.008 * insideCat)
+          + vec2(surfNormal.x, surfNormal.y) * (h * 0.007);
 
         CatGeom gLayer = evalCat(pLayer);
-        float edgeSlack = h * (0.006 + localLen * 0.016);
+        float edgeSlack = h * (0.005 + localLen * 0.015);
         if (gLayer.sdf > edgeSlack) continue;
 
         float bodyCov = smoothstep(edgeSlack, -0.008, gLayer.sdf);
-        float fiber = sampleFurFiber(pLayer + vec2(h * 0.012, -h * 0.009), effDir, uFurClump);
+        // Shift fiber texture slightly more along combLocal for crisp hair-strand tracking without smearing coat colors!
+        vec2 fiberPos = pLayer - combLocal * (h * 0.011) + vec2(h * 0.012, -h * 0.009);
+        float fiber = sampleFurFiber(fiberPos, effDir, effClump);
 
         float layerAlpha;
         if (i == 0) {
           layerAlpha = bodyCov;
         } else {
-          // Part outer fur layers slightly open in comb tooth troughs so real parting grooves appear!
-          float troughParting = toothTrough * h * 0.28;
-          float threshold = h * (0.76 - againstGrain * 0.10) + troughParting;
-          float strand = smoothstep(threshold, threshold + 0.24, fiber);
+          // Subtle silky parting in comb troughs + spiky open tufts when bristled (炸毛)!
+          float troughParting = toothTrough * h * 0.13 + localRuffle * h * 0.12;
+          float threshold = h * (0.76 - againstGrain * 0.06) + troughParting;
+          float strand = smoothstep(threshold, threshold + 0.23, fiber);
           float edgeSoft = mix(0.62, 1.0, smoothstep(0.006, -0.025, gLayer.sdf));
           layerAlpha = strand * bodyCov * edgeSoft * (0.34 + 0.28 * (1.0 - h));
         }
 
         if (layerAlpha < 0.004) continue;
 
-        vec3 coat = evalCoatColor(pLayer, gLayer);
+        // Anchor coat pattern color near natural hair root so calico/tabby spots NEVER melt/stretch!
+        vec2 pCoat = catP - baseFlow * (overhang * 0.65) - combLocal * (h * 0.004 * insideCat);
+        vec3 coat = evalCoatColor(pCoat, gLayer);
         float rootAO = mix(0.36, 1.06, pow(h, 0.62));
-        float pressAO = 1.0 - indent * mix(0.46, 0.22, h) - toothTrough * mix(0.32, 0.14, h);
+        float pressAO = 1.0 - indent * mix(0.44, 0.20, h) - toothTrough * mix(0.22, 0.09, h);
         float bellyAO = 0.70 + 0.30 * smoothstep(0.0, 0.36, gLayer.height);
 
-        vec3 tuftN = normalize(surfNormal + vec3((fiber - 0.5) * 0.45 * effDir, 0.0));
+        vec3 tuftN = normalize(surfNormal + vec3((fiber - 0.5) * (0.45 + localRuffle * 0.35) * effDir, 0.0));
         float ndl = dot(tuftN, lightDir);
         float wrapDiff = clamp((ndl + 0.55) / 1.55, 0.0, 1.0);
 
-        vec3 tangent3 = normalize(vec3(effDir * (0.85 - againstGrain * 0.25), 0.32 + againstGrain * 0.35));
+        vec3 tangent3 = normalize(vec3(effDir * (0.85 - againstGrain * 0.28), 0.32 + againstGrain * 0.42));
         float tdh = dot(tangent3, halfVec);
         float sinTH = sqrt(max(0.0, 1.0 - tdh * tdh));
         float coatLum = dot(coat, vec3(0.299, 0.587, 0.114));
         float sheenScale = mix(0.45, 1.0, smoothstep(0.04, 0.35, coatLum));
-        float sheenSpec = pow(sinTH, 16.0) * (uSheen + groomedSheenBoost) * sheenScale * (0.11 + 0.22 * h) * (0.35 + 0.65 * wrapDiff);
-        float rim = pow(1.0 - max(0.0, tuftN.z), 2.8) * h * 0.12 * smoothstep(0.008, -0.015, gLayer.sdf);
+        float sheenSpec = pow(sinTH, 16.0) * (uSheen + groomedSheenBoost) * sheenScale * (0.10 + 0.18 * h) * (0.35 + 0.65 * wrapDiff);
+        float rim = pow(1.0 - max(0.0, tuftN.z), 2.8) * h * (0.12 + localRuffle * 0.10) * smoothstep(0.008, -0.015, gLayer.sdf);
 
         vec3 bounce = mix(vec3(0.12, 0.095, 0.07), vec3(0.035, 0.055, 0.10), max(uNight, uRain * 0.45)) * (1.0 - wrapDiff) * (0.5 + 0.5 * h);
         float catBeam = evalWindowLight(uv, (gLayer.height - indent * 0.28) * 0.52);
         float catRain = evalRainShadows(uv, (gLayer.height - indent * 0.28) * 0.52);
 
-        vec3 litFur = coat * (0.32 + 0.76 * wrapDiff + ridgeCrest * h * 0.12) * rootAO * pressAO * bellyAO
+        vec3 litFur = coat * (0.32 + 0.76 * wrapDiff + ridgeCrest * h * 0.06) * rootAO * pressAO * bellyAO
           + mix(vec3(1.0, 0.96, 0.90), vec3(0.75, 0.86, 1.0), max(uNight, uRain * 0.5)) * (sheenSpec + rim * (0.35 + 0.65 * catBeam))
           + coat * bounce;
 
