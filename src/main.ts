@@ -41,7 +41,6 @@ const ATMOSPHERE_LABEL: Record<AtmosphereMode, string> = {
 /** Only Black (kuro) and Orange Tabby (mugi) are free by default; all other breeds unlock after following! */
 const FREE_BREEDS = new Set(['kuro', 'mugi']);
 const FOLLOW_LOCKED_BREEDS = new Set(CAT_BREEDS.filter((b) => !FREE_BREEDS.has(b.id)).map((b) => b.id));
-const LOCAL_DEMO_UNLOCK_KEY = 'open_pet_the_cat_local_demo_unlocked';
 
 function furLengthLabel(val: number): string {
   if (val <= 0.04) return '无毛';
@@ -133,7 +132,6 @@ function initApp(): void {
   const followGoBtn = document.getElementById('follow-go-btn') as HTMLButtonElement;
   const followVerifyBtn = document.getElementById('follow-verify-btn') as HTMLButtonElement;
   const followOwnerBtn = document.getElementById('follow-owner-btn') as HTMLButtonElement;
-  const followDemoBtn = document.getElementById('follow-demo-btn') as HTMLButtonElement;
 
   const toastEl = document.getElementById('stage-toast') as HTMLElement;
 
@@ -167,9 +165,8 @@ function initApp(): void {
     purr.setPurrVoice(resolveBreedPurrVoice(currentBreed));
   }
 
-  // Follow-Lock state (locked by default until verified via toy.getAuthorRelation!)
+  // Follow-Lock state (locked by default until verified via toy.getAuthorRelation or author self-check!)
   let followUnlocked = false;
-  let isStandalonePreview = false;
   let authorInfo: AuthorInfo | null = null;
   let isLandscapeMode = false;
   let pendingUnlockAction: (() => void) | null = null;
@@ -302,8 +299,6 @@ function initApp(): void {
       followPlaceholderEl.hidden = false;
     }
 
-    // Demo unlock button is strictly hidden inside real Bilibili runtime!
-    followDemoBtn.hidden = !isStandalonePreview;
     followModalEl.hidden = false;
   }
 
@@ -333,13 +328,11 @@ function initApp(): void {
   async function refreshFollowStatus(userTriggered = false): Promise<void> {
     const res = await toyBridge.checkAuthorFollow();
     if (res.state === 'following') {
-      isStandalonePreview = false;
       completeUnlock('感谢关注！已解锁全部猫种与特色玩法 ✨');
       return;
     }
 
     if (res.state === 'not_following') {
-      isStandalonePreview = false;
       // On user-triggered verify, also check if the current user IS the author herself ("知喵~")!
       if (userTriggered) {
         const isSelf = await tryVerifyAuthorSelf();
@@ -353,27 +346,15 @@ function initApp(): void {
       return;
     }
 
-    if (res.state === 'unavailable') {
-      isStandalonePreview = false;
-      if (userTriggered) {
-        const isSelf = await tryVerifyAuthorSelf();
-        if (isSelf) return;
-      }
-      // Strictly follow SDK rule: never treat unavailable/unauthorized as unlocked!
-      followUnlocked = false;
-      syncLockBadges();
-      if (userTriggered) {
-        followHintEl.textContent = '请先登录 B站账号并关注 UP 主，或稍后再试';
-      }
-      return;
+    // Strictly follow SDK rule: never treat unavailable/unauthorized as unlocked!
+    if (userTriggered) {
+      const isSelf = await tryVerifyAuthorSelf();
+      if (isSelf) return;
     }
-
-    // Standalone local/Web preview outside Bilibili Toy SDK
-    isStandalonePreview = true;
-    followUnlocked = window.localStorage.getItem(LOCAL_DEMO_UNLOCK_KEY) === '1';
+    followUnlocked = false;
     syncLockBadges();
-    if (userTriggered && !followUnlocked) {
-      followHintEl.textContent = '当前为非 B站独立预览环境，已为你打开主页或可点下方「模拟已关注」体验';
+    if (userTriggered) {
+      followHintEl.textContent = '请先登录 B站账号并关注 UP 主，或稍后再试';
     }
   }
 
@@ -401,21 +382,11 @@ function initApp(): void {
   });
 
   followOwnerBtn.addEventListener('click', async () => {
-    if (isStandalonePreview) {
-      followHintEl.textContent = `非 B站环境无法读取 B站昵称，本地预览请点下方模拟解锁（B站内会自动识别「${AUTHOR_SELF_NICKNAME}」）`;
-      return;
-    }
     followHintEl.textContent = `正在验证作者身份（${AUTHOR_SELF_NICKNAME}）…`;
     const ok = await tryVerifyAuthorSelf();
     if (!ok) {
-      followHintEl.textContent = `当前账号昵称不是「${AUTHOR_SELF_NICKNAME}」，关注主页后即可免费解锁全部内容~`;
+      followHintEl.textContent = `未匹配到作者「${AUTHOR_SELF_NICKNAME}」或暂未登录 B站，关注主页后即可免费解锁~`;
     }
-  });
-
-  followDemoBtn.addEventListener('click', () => {
-    if (!isStandalonePreview) return;
-    window.localStorage.setItem(LOCAL_DEMO_UNLOCK_KEY, '1');
-    completeUnlock('本地预览：已模拟关注并解锁全部猫种与特色功能 ✨');
   });
 
   // Auto re-check follow status whenever user returns from author space page!

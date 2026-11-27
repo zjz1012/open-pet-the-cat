@@ -1079,26 +1079,6 @@ html[data-theme='dark'] .breed-swatch[aria-pressed='true']:not([data-locked='tru
   background: var(--surface);
 }
 
-.demo-unlock-btn {
-  width: 100%;
-  padding: 8px 12px;
-  border-radius: 10px;
-  border: 1px dashed var(--border);
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.demo-unlock-btn:hover {
-  color: var(--text);
-  background: var(--surface);
-}
-
-.demo-unlock-btn[hidden] {
-  display: none;
-}
-
 /* ---------- Polaroid Viewfinder Modal ---------- */
 .polaroid-card {
   width: min(500px, 100%);

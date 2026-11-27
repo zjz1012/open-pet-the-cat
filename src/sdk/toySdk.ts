@@ -95,8 +95,7 @@ export interface AuthorInfo {
 export type FollowCheckResult =
   | { state: 'following' }
   | { state: 'not_following' }
-  | { state: 'unavailable'; reason: string }
-  | { state: 'standalone_preview' };
+  | { state: 'unavailable'; reason: string };
 
 export class ToyBridge {
   private readonly supportCache = new Map<string, boolean>();
@@ -132,25 +131,12 @@ export class ToyBridge {
     }
   }
 
-  public isBilibiliHost(): boolean {
-    if (typeof window === 'undefined') return false;
-    const host = window.location.hostname.toLowerCase();
-    const isBiliDomain =
-      host === 'bilibili.com' ||
-      host.endsWith('.bilibili.com') ||
-      host.endsWith('.hdslb.com');
-    const isBiliUa = /BiliApp/i.test(window.navigator.userAgent || '');
-    return isBiliDomain || isBiliUa;
-  }
-
   /**
    * Checks whether current Bilibili visitor follows the Toy author.
+   * Strictly relies on official Toy SDK `isSupport('getAuthorRelation')` + `getAuthorRelation()`.
    * Never treats error/unavailable/unlogged-in states as unlocked!
    */
   public async checkAuthorFollow(): Promise<FollowCheckResult> {
-    if (!this.isBilibiliHost()) {
-      return { state: 'standalone_preview' };
-    }
     const ok = await this.isSupport('getAuthorRelation');
     const sdk = this.getRawSdk();
     if (!ok || !sdk) {
@@ -205,7 +191,6 @@ export class ToyBridge {
    * Used to detect the author herself (`知喵~`) since authors cannot follow themselves on Bilibili.
    */
   public async getUserProfile(): Promise<ToyUserProfile | null> {
-    if (!this.isBilibiliHost()) return null;
     const ok = await this.isSupport('getUserProfile');
     const sdk = this.getRawSdk();
     if (!ok || !sdk) return null;
@@ -229,7 +214,7 @@ export class ToyBridge {
     const targetMid = mid || AUTHOR_SPACE_MID;
     const ok = await this.isSupport('navigate');
     const sdk = this.getRawSdk();
-    if (this.isBilibiliHost() && ok && sdk) {
+    if (ok && sdk) {
       try {
         await sdk.navigate({ type: 'space', id: targetMid, extra: { from: 'toy' } });
         return 'sdk';
@@ -347,18 +332,16 @@ export class ToyBridge {
 
   /** Read single JSON profile key from Bilibili cloud storage once on startup (with localStorage mirror fallback) */
   public async loadCloudProfile(): Promise<{ token: string; source: 'cloud' | 'local' } | null> {
-    if (this.isBilibiliHost()) {
-      const ok = await this.isSupport('getCloudStorage');
-      const sdk = this.getRawSdk();
-      if (ok && sdk) {
-        try {
-          const data = await sdk.getCloudStorage(['cat_profile_v1']);
-          if (typeof data?.cat_profile_v1 === 'string' && data.cat_profile_v1.length > 12) {
-            return { token: data.cat_profile_v1, source: 'cloud' };
-          }
-        } catch {
-          // Fall through to local backup
+    const ok = await this.isSupport('getCloudStorage');
+    const sdk = this.getRawSdk();
+    if (ok && sdk) {
+      try {
+        const data = await sdk.getCloudStorage(['cat_profile_v1']);
+        if (typeof data?.cat_profile_v1 === 'string' && data.cat_profile_v1.length > 12) {
+          return { token: data.cat_profile_v1, source: 'cloud' };
         }
+      } catch {
+        // Fall through to local backup
       }
     }
     try {
@@ -384,15 +367,13 @@ export class ToyBridge {
       // Ignore private-mode storage errors
     }
 
-    if (!this.isBilibiliHost()) return 'local';
+    const ok = await this.isSupport('setCloudStorage');
+    const sdk = this.getRawSdk();
+    if (!ok || !sdk) return 'local';
 
     const now = Date.now();
     const minInterval = force ? Math.max(1500, this.cloudBackoffMs) : Math.max(4000, this.cloudBackoffMs);
     if (now - this.lastCloudSaveTs < minInterval) return 'throttled';
-
-    const ok = await this.isSupport('setCloudStorage');
-    const sdk = this.getRawSdk();
-    if (!ok || !sdk) return 'local';
 
     this.lastCloudSaveTs = now;
     try {
