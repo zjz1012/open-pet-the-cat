@@ -133,6 +133,14 @@ function initApp(): void {
   const followVerifyBtn = document.getElementById('follow-verify-btn') as HTMLButtonElement;
   const followOwnerBtn = document.getElementById('follow-owner-btn') as HTMLButtonElement;
 
+  // About Modal elements
+  const aboutToggleBtn = document.getElementById('about-toggle') as HTMLButtonElement;
+  const aboutPopoverBtn = document.getElementById('about-popover-btn') as HTMLButtonElement;
+  const aboutModalEl = document.getElementById('about-modal') as HTMLElement;
+  const aboutCloseBtn = document.getElementById('about-close-btn') as HTMLButtonElement;
+  const aboutCopyBtn = document.getElementById('about-copy-btn') as HTMLButtonElement;
+  const PROJECT_REPO_URL = 'https://github.com/zjz1012/open-pet-the-cat';
+
   const toastEl = document.getElementById('stage-toast') as HTMLElement;
 
   const toyBridge = new ToyBridge();
@@ -386,6 +394,30 @@ function initApp(): void {
     const ok = await tryVerifyAuthorSelf();
     if (!ok) {
       followHintEl.textContent = `未匹配到作者「${AUTHOR_SELF_NICKNAME}」或暂未登录 B站，关注主页后即可免费解锁~`;
+    }
+  });
+
+  function openAboutModal(): void {
+    setPopoverOpen(false);
+    aboutModalEl.hidden = false;
+  }
+
+  function closeAboutModal(): void {
+    aboutModalEl.hidden = true;
+  }
+
+  aboutToggleBtn.addEventListener('click', openAboutModal);
+  aboutPopoverBtn.addEventListener('click', openAboutModal);
+  aboutCloseBtn.addEventListener('click', closeAboutModal);
+  aboutModalEl.addEventListener('pointerdown', (e) => {
+    if (e.target === aboutModalEl) closeAboutModal();
+  });
+  aboutCopyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(PROJECT_REPO_URL);
+      showToast('已复制 GitHub 项目地址 🔗', 2000);
+    } catch {
+      showToast('请长按或点击上方项目链接访问', 2000);
     }
   });
 
@@ -1194,6 +1226,7 @@ function initApp(): void {
     } else if (e.key === '3') {
       requireFollowUnlock('红点激光笔', () => selectTool('laser', true));
     } else if (e.key === 'Escape') {
+      if (!aboutModalEl.hidden) closeAboutModal();
       if (isPolaroidOpen) closePolaroidViewfinder();
       if (!followModalEl.hidden) closeFollowModal();
       if (!propPanelEl.hidden) setPopoverOpen(false);

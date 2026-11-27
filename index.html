@@ -374,7 +374,8 @@
                 </div>
 
                 <div class="popover-foot">
-                  <button id="cloud-save-btn" class="text-btn text-btn-accent" type="button">保存猫咪云存档 ☁️</button>
+                  <button id="cloud-save-btn" class="text-btn text-btn-accent" type="button">保存云存档 ☁️</button>
+                  <button id="about-popover-btn" class="text-btn" type="button">关于</button>
                   <button id="reset-proportions" class="text-btn" type="button">恢复默认</button>
                 </div>
               </div>
@@ -474,9 +475,52 @@
           <span class="hint">
             轻点拍屁股 · 逆毛会炸毛 · <kbd>1-3</kbd> 换道具 · <kbd>C</kbd> 捏猫工坊 · <kbd>Space</kbd> 自动撸 · <kbd>T</kbd> 晴/雨/夜
           </span>
+          <span class="sep" aria-hidden="true">·</span>
+          <button id="about-toggle" class="footer-link" type="button">关于</button>
         </footer>
       </section>
     </main>
+
+    <!-- About Modal -->
+    <div id="about-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="about-modal-title" hidden>
+      <div class="modal-card about-card">
+        <button id="about-close-btn" class="modal-close" type="button" aria-label="关闭关于弹窗">×</button>
+
+        <div class="about-head">
+          <h2 id="about-modal-title" class="modal-title">关于 · 呼噜噜云撸猫 🐾</h2>
+          <p class="modal-sub">作者：知喵~（zhimiao） · MIT 开源项目</p>
+        </div>
+
+        <p class="about-desc">
+          基于 2.5D WebGL2 实时体积毛发与柔体物理打造，支持 13 种猫咪、真实猫呼噜 ASMR、拍屁股尾巴绷直、逆毛炸毛自舔、木质排梳攒毛球、360° 追激光、基因捏猫工坊与拍立得留念。
+        </p>
+
+        <div class="about-link-box">
+          <span class="about-link-label">开源项目地址（GitHub）</span>
+          <a
+            id="about-repo-link"
+            class="about-repo-url"
+            href="https://github.com/zjz1012/open-pet-the-cat"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            https://github.com/zjz1012/open-pet-the-cat
+          </a>
+        </div>
+
+        <div class="modal-actions">
+          <a
+            class="primary-btn modal-btn about-visit-btn"
+            href="https://github.com/zjz1012/open-pet-the-cat"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            访问 GitHub 项目页
+          </a>
+          <button id="about-copy-btn" class="secondary-btn modal-btn" type="button">复制地址</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Polaroid Camera Viewfinder Modal -->
     <div id="polaroid-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="polaroid-modal-title" hidden>
