@@ -329,10 +329,10 @@ struct CatGeom {
   float sdf;
   float height;
   vec2 flow;
-  vec2 headLocal;
   float headMask;
   float earMask;
-  float earInner;
+  float earT;       // 0 at skull base -> 1 at rounded ear tip (smooth fur-to-ear transition!)
+  float earCrease;  // subtle soft front-edge fold depth (no hard inner-ear cutout!)
   float tailMask;
   float tailT;
   float ruffMask;
@@ -367,19 +367,18 @@ CatGeom evalCat(vec2 rawP) {
   vec2 torsoDelta = vec2(p.x - clampedX, (p.y - spineArch) / widthFactor);
   float dTorso = length(torsoDelta) - spineProfile;
 
-  // 2) Authentic Round Apple-Shaped Domestic Cat Head (wide chubby cheeks, SHORT soft face — zero rat snout!)
+  // 2) Authentic Round Tucked Domestic Cat Head (chin tucked comfortably down on cushion, zero facial overlay!)
+  // Clear, gentle feline neck-to-shoulder taper so the head reads unmistakably as a cat's head (not a bolster!)
   vec2 neckPivot = vec2(-0.215, -0.004) + uGroomHeadShift;
   vec2 pHeadSpace = rot2d(p - neckPivot, -uHeadYaw) + vec2(-0.215, -0.004);
-  vec2 headCenter = vec2(-0.292, -0.008);
+  vec2 headCenter = vec2(-0.304, -0.006);
   vec2 hp = pHeadSpace - headCenter;
-  g.headLocal = hp;
 
-  // Real top-down cat head: slightly wider across cheeks (Y) than long (X), gently tucked into a thick plush neck!
-  float cheekFullness = 1.0 + 0.10 * smoothstep(-0.06, 0.04, hp.x);
-  float dHead = length(vec2(hp.x / 0.96, hp.y / (1.06 * cheekFullness))) - 0.104;
-  // Subtle rounded forehead/brow curve (short cute cat muzzle, NOT a long protruding snout!)
-  float dBrow = length(vec2((hp.x + 0.048) / 0.062, hp.y / 0.074)) - 1.0;
-  dHead = smin(dHead, dBrow * 0.060, 0.036);
+  // Real top-down tucked cat head: rounded apple crown, soft cheeks, gently tapered forehead resting between ears
+  float cheekFullness = 1.0 + 0.10 * smoothstep(-0.055, 0.045, hp.x);
+  float dHead = length(vec2(hp.x / 0.94, hp.y / (1.02 * cheekFullness))) - 0.098;
+  float dForehead = length(vec2((hp.x + 0.044) / 0.052, hp.y / 0.058)) - 1.0;
+  dHead = smin(dHead, dForehead * 0.048, 0.036);
 
   // Cute front paws peeking out when scampering or pouncing at the red laser dot!
   float dPaws = 1e5;
@@ -387,38 +386,42 @@ CatGeom evalCat(vec2 rawP) {
   if (pawShow > 0.04) {
     float strideL = sin(uWalkPhase) * uWalkAmp * 0.025;
     float strideR = -strideL;
-    vec2 lPawPos = vec2(-0.34 - pawShow * 0.062 + strideL, -0.072);
-    vec2 rPawPos = vec2(-0.34 - pawShow * 0.062 + strideR,  0.058);
+    vec2 lPawPos = vec2(-0.35 - pawShow * 0.062 + strideL, -0.072);
+    vec2 rPawPos = vec2(-0.35 - pawShow * 0.062 + strideR,  0.058);
     float dLP = length((p - lPawPos) / vec2(0.044, 0.025)) - 1.0;
     float dRP = length((p - rPawPos) / vec2(0.044, 0.025)) - 1.0;
     dPaws = min(dLP, dRP) * 0.026;
   }
 
-  // Thick, plush, seamless neck transition into shoulders (zero pinched hourglass seam!)
-  float dBody = smin(min(dTorso, dPaws), dHead, 0.068);
+  // Natural plush neck curve (0.052 smin gives a gentle realistic feline shoulder-to-head contour)
+  float dBody = smin(min(dTorso, dPaws), dHead, 0.052);
 
-  // 3) Organic Cupped 3D Cat Ears Growing Seamlessly Out of the Crown!
-  // Protrude clearly at ~11 o'clock (2.48 rad) & ~7:30 (0.66 rad) with wide flared base + softly rounded tips!
-  vec2 lEarBase = headCenter + vec2(-0.006 + uLeftEarSquish * 0.026, -0.066 - uLeftEarSquish * 0.012);
-  float lAngle = 2.50 - uLeftEarSquish * 0.56;
+  // 3) Sculpted 3D Cat Ears with Organic Hairline & Continuous Root-to-Tip Velvety Transition!
+  // Note: screen +Y is DOWN, -Y is UP; rot2d((0,1), a) = (-sin a, cos a).
+  // Top-left ear projects cleanly UP-and-LEFT (~2.60 rad -> (-0.52, -0.86));
+  // Bottom-left ear projects cleanly LEFT-and-DOWN (~0.92 rad -> (-0.80, +0.60)).
+  vec2 lEarBase = headCenter + vec2(0.008 + uLeftEarSquish * 0.024, -0.054 - uLeftEarSquish * 0.012);
+  float lAngle = 2.60 - uLeftEarSquish * 0.50;
   vec2 lLocal = rot2d(pHeadSpace - lEarBase, -lAngle);
-  float lLen = 0.104 * (1.0 - max(0.0, uLeftEarSquish) * 0.14);
-  float dLeftEar = sdCatEar(lLocal, 0.046, lLen, 0.014);
-  // Cupped velvety inner ear hollow (facing forward-left with soft base fade under crown fur!)
-  float lInnerSdf = sdCatEar(lLocal - vec2(-0.008, 0.016), 0.025, lLen * 0.68, 0.008);
-  float lInner = smoothstep(0.006, -0.014, lInnerSdf) * smoothstep(0.006, 0.036, lLocal.y);
+  float lLen = 0.118 * (1.0 - max(0.0, uLeftEarSquish) * 0.14);
+  float dLeftEar = sdCatEar(lLocal, 0.043, lLen, 0.013);
+  float lT = clamp((lLocal.y - 0.006) / max(lLen, 1e-4), 0.0, 1.0);
+  // Subtle cupped 3D pinna fold along the inward-front side of the ear
+  float lCrease = smoothstep(0.022, -0.016, lLocal.x) * smoothstep(0.22, 0.58, lT) * smoothstep(0.98, 0.65, lT);
+  float lRidge = exp(-pow((lLocal.x - 0.006) / 0.022, 2.0)) * smoothstep(0.08, 0.48, lT);
 
-  vec2 rEarBase = headCenter + vec2(-0.006 + uRightEarSquish * 0.026, 0.066 + uRightEarSquish * 0.012);
-  float rAngle = 0.64 + uRightEarSquish * 0.56;
+  vec2 rEarBase = headCenter + vec2(-0.012 + uRightEarSquish * 0.024, 0.050 + uRightEarSquish * 0.012);
+  float rAngle = 0.88 + uRightEarSquish * 0.50;
   vec2 rLocal = rot2d(pHeadSpace - rEarBase, -rAngle);
-  float rLen = 0.104 * (1.0 - max(0.0, uRightEarSquish) * 0.14);
-  float dRightEar = sdCatEar(rLocal, 0.046, rLen, 0.014);
-  float rInnerSdf = sdCatEar(rLocal - vec2(0.008, 0.016), 0.025, rLen * 0.68, 0.008);
-  float rInner = smoothstep(0.006, -0.014, rInnerSdf) * smoothstep(0.006, 0.036, rLocal.y);
+  float rLen = 0.114 * (1.0 - max(0.0, uRightEarSquish) * 0.14);
+  float dRightEar = sdCatEar(rLocal, 0.042, rLen, 0.013);
+  float rT = clamp((rLocal.y - 0.006) / max(rLen, 1e-4), 0.0, 1.0);
+  float rCrease = smoothstep(-0.022, 0.016, rLocal.x) * smoothstep(0.22, 0.58, rT) * smoothstep(0.98, 0.65, rT);
+  float rRidge = exp(-pow((rLocal.x + 0.006) / 0.022, 2.0)) * smoothstep(0.08, 0.48, rT);
 
   float dEars = min(dLeftEar, dRightEar);
-  // Generous smooth-min root blend (0.028) fuses ears seamlessly into skull fur!
-  float dHeadAndEars = smin(dBody, dEars, 0.028);
+  // Generous smooth-min root fusion (0.032) so ears grow organically out of the skull with zero seam!
+  float dHeadAndEars = smin(dBody, dEars, 0.032);
 
   // 4) Smooth 13-Point Catmull-Rom Articulated Tail
   float dTail = 1e5;
@@ -444,14 +447,15 @@ CatGeom evalCat(vec2 rawP) {
 
   g.sdf = smin(dHeadAndEars, dTail, 0.036);
 
-  g.headMask = smoothstep(0.045, -0.055, dHead);
-  g.earMask = smoothstep(0.015, -0.012, dEars);
-  // Ensure inner ear pink recess ONLY appears on ears protruding cleanly outside the torso (never floating on back!)
-  g.earInner = max(lInner, rInner) * g.earMask * smoothstep(-0.025, 0.018, dTorso);
+  g.headMask = smoothstep(0.050, -0.055, dHead);
+  // Wide soft ear mask (0.035 -> -0.020) so ear transitions seamlessly out of head fur with zero step edge!
+  g.earMask = smoothstep(0.035, -0.020, dEars) * smoothstep(-0.035, 0.020, dTorso);
+  g.earT = (dLeftEar < dRightEar ? lT : rT) * g.earMask;
+  g.earCrease = (dLeftEar < dRightEar ? lCrease : rCrease) * g.earMask;
   g.tailMask = smoothstep(0.025, -0.022, dTail) * smoothstep(-0.02, 0.05, dTorso);
   g.ruffMask = exp(-pow((p.x + 0.22) / 0.085, 2.0)) * smoothstep(0.02, -0.04, dBody);
 
-  // 5) Smooth Volumetric Dome Height (seamless crown, skull, cupped ears & rounded loaf back!)
+  // 5) Smooth Volumetric Dome Height (unified skull -> ear back slope, zero seam!)
   float bodyEdge = clamp(-dTorso / (spineProfile * 0.98), 0.0, 1.0);
   float torsoH = pow(sin(bodyEdge * 1.570796), 0.62) * 0.92;
   torsoH *= 1.0 + 0.08 * smoothstep(-0.05, 0.14, p.x);
@@ -462,18 +466,19 @@ CatGeom evalCat(vec2 rawP) {
   float headEdge = clamp(-dHead / 0.112, 0.0, 1.0);
   float headH = pow(sin(headEdge * 1.570796), 0.58) * (0.88 - uHeadPress * 0.11);
 
-  // Cupped 3D ear height: smooth raised outer rim + gently concave velvety inner ear hollow
   float earEdge = clamp(-dEars / 0.042, 0.0, 1.0);
   float earSquishAvg = dLeftEar < dRightEar ? uLeftEarSquish : uRightEarSquish;
-  float earRimH = pow(earEdge, 0.62) * (0.58 - earSquishAvg * 0.22);
-  float earH = earRimH - g.earInner * 0.20;
+  float earRidgeVal = dLeftEar < dRightEar ? lRidge : rRidge;
+  // Sculpted 3D feline ear cartilage: plush rounded crown base + convex ear-back ridge + gentle front fold
+  float earH = (pow(earEdge, 0.58) * mix(0.72, 0.42, g.earT) + earRidgeVal * 0.14 - g.earCrease * 0.16)
+    * (1.0 - earSquishAvg * 0.28);
 
   float tailEdge = clamp(-dTail / (0.044 * max(0.7, uTailFluff)), 0.0, 1.0);
   float tailH = pow(sin(tailEdge * 1.570796), 0.65) * mix(0.46, 0.30, bestTailT);
 
   float mergedH = smax(torsoH, headH, 0.22);
   mergedH = smax(mergedH, tailH, 0.14);
-  g.height = smax(mergedH, earH, 0.13);
+  g.height = smax(mergedH, earH, 0.18);
   g.tailT = bestTailT;
 
   // 6) Natural Fur Flow Field
@@ -522,17 +527,21 @@ vec3 evalCoatColor(vec2 p, CatGeom g) {
     col = mix(uPrimaryColor, uSecondaryColor, darkMask);
     col = mix(col, uTertiaryColor, bellyFade * 0.48);
   } else if (uPatternType == 2) {
-    float nOrange = fbm2(wp * 1.45 + vec2(1.4, 2.9));
-    float nBlack  = fbm2(wp * 1.55 + vec2(6.8, 0.7));
-    float orangePatch = smoothstep(0.50, 0.56, nOrange + 0.08 * sin(mp.x * 5.0));
-    float blackPatch  = smoothstep(0.52, 0.58, nBlack - 0.06 * mp.y);
-    float headCap = smoothstep(0.47, 0.55, fbm2(wp * 2.1 + 3.1)) * g.headMask;
-    float tailBand = sin(g.tailT * 17.0);
-    float tailBlack = smoothstep(0.05, 0.42, tailBand) * g.tailMask;
-    float tailOrange = smoothstep(-0.05, -0.42, tailBand) * g.tailMask;
+    // Plush organic Japanese Calico (三花): clean creamy white base + large soft fur-feathered orange & black patches!
+    vec2 softWp = mp + warp * 0.55;
+    float nOrange = fbm2(softWp * 0.88 + vec2(1.2, 2.7));
+    float nBlack  = fbm2(softWp * 0.96 + vec2(5.9, 1.1));
+    float orangePatch = smoothstep(0.50, 0.63, nOrange + 0.09 * sin(mp.x * 4.0 - 0.4) - 0.05 * mp.y);
+    float blackPatch  = smoothstep(0.52, 0.65, nBlack - 0.07 * mp.y + 0.06 * cos(mp.x * 3.6));
+    // Classic cute calico crown markings between/behind ears while keeping plush white neck
+    float crownCap = smoothstep(0.42, 0.58, fbm2(softWp * 1.45 + 2.4)) * g.headMask * smoothstep(-0.24, -0.32, mp.x);
+    float crownOrange = smoothstep(0.44, 0.59, fbm2(softWp * 1.65 + 7.1)) * g.headMask * smoothstep(-0.25, -0.32, mp.x);
+    float tailBand = sin(g.tailT * 15.0 + 0.5);
+    float tailBlack = smoothstep(0.06, 0.48, tailBand) * g.tailMask;
+    float tailOrange = smoothstep(-0.06, -0.48, tailBand) * g.tailMask;
     col = uPrimaryColor;
-    col = mix(col, uSecondaryColor, clamp(orangePatch + tailOrange * 0.88, 0.0, 1.0));
-    col = mix(col, uTertiaryColor, clamp(blackPatch + headCap * 0.82 + tailBlack * 0.90, 0.0, 1.0));
+    col = mix(col, uSecondaryColor, clamp(orangePatch + crownOrange * 0.78 + tailOrange * 0.85, 0.0, 1.0));
+    col = mix(col, uTertiaryColor, clamp(blackPatch + crownCap * 0.82 + tailBlack * 0.88, 0.0, 1.0));
   } else if (uPatternType == 3) {
     float saddleField = fbm2(wp * 1.7 + vec2(uPatternSeed * 0.7, 2.2));
     float dorsalBias = smoothstep(0.135, 0.03, abs(mp.y + 0.02 * sin(mp.x * 7.0)));
@@ -572,11 +581,13 @@ vec3 evalCoatColor(vec2 p, CatGeom g) {
     col = mix(col, uSecondaryColor, clamp(max(earShade, tailShade), 0.0, 0.75));
   }
 
-  // Subtle soft ear-back plush velvety tint & sculpted warm inner-ear hollow shading
-  float earBackBlend = g.earMask * (1.0 - g.earInner) * 0.28;
-  vec3 warmEarBack = mix(col, uEarInnerColor * 0.78, 0.55);
-  col = mix(col, warmEarBack, earBackBlend);
-  col = mix(col, uEarInnerColor, g.earInner * 0.85);
+  // Organic hair-feathered transition from dense crown fur at ear base -> warm velvety ear-back skin toward tip!
+  float earHairNoise = (fbm2(p * 11.5 + 2.3) - 0.5) * 0.18;
+  float earVelvet = smoothstep(0.16, 0.82, g.earT + earHairNoise * g.earMask);
+  vec3 velvetyEarSkin = mix(col * 0.78 + uEarInnerColor * 0.28, uEarInnerColor, 0.58);
+  col = mix(col, velvetyEarSkin, earVelvet * 0.72);
+  // Subtle warm pinkish-brown concave depth inside the soft front-inward ear fold
+  col = mix(col, uEarInnerColor * 0.76, g.earCrease * 0.62);
   return col;
 }
 
@@ -865,11 +876,14 @@ void main() {
       float bristleZone = smoothstep(-0.24, -0.06, catP.x);
       float localRuffle = clamp(uRuffleLevel * bristleZone, 0.0, 1.0);
 
-      // Sleek short velvety plush fur on forehead, cheeks & ears (ZERO spiky jagged edges on ears!)
-      float headSmooth = max(gHere.headMask, gHere.earMask);
+      // Continuous hair-feathered fur-length taper:
+      // plush body -> soft shorter crown -> feathered ear root -> sleek crisp velvety ear tip!
+      // Eliminates both the "two separate layers" seam AND blurry smoky ear tips!
+      float earTipFade = smoothstep(0.12, 0.76, gHere.earT);
+      float headSmooth = clamp(gHere.headMask * 0.78 + earTipFade * 0.96, 0.0, 1.0);
       float localLen = uFurLength
-        * mix(1.0, 0.34, gHere.headMask)
-        * mix(1.0, 0.22, gHere.earMask)
+        * mix(1.0, 0.36, gHere.headMask)
+        * mix(1.0, 0.14, earTipFade)
         * (1.0 + gHere.ruffMask * 0.55 * uRuffFluff)
         * (1.0 + localRuffle * 0.48)
         * mix(1.0, max(0.75, uTailFluff) * (1.0 + uRuffleLevel * 0.35), gHere.tailMask);
@@ -896,17 +910,18 @@ void main() {
         if (accumAlpha > 0.985) break;
 
         float h = float(i) / float(LAYERS - 1);
-        float overhang = h * (0.011 + localLen * 0.032);
+        float baseOverhang = mix(0.011, 0.0022, earTipFade);
+        float overhang = h * (baseOverhang + localLen * 0.032);
         vec2 pLayer = catP
           - effDir * overhang
           - combLocal * (h * 0.007 * insideCat)
-          + vec2(surfNormal.x, surfNormal.y) * (h * 0.007);
+          + vec2(surfNormal.x, surfNormal.y) * (h * mix(0.007, 0.0025, earTipFade));
 
         CatGeom gLayer = evalCat(pLayer);
-        float edgeSlack = h * mix(0.005 + localLen * 0.016, 0.002 + localLen * 0.006, headSmooth);
+        float edgeSlack = h * mix(0.005 + localLen * 0.016, mix(0.0022, 0.0008, earTipFade) + localLen * 0.005, headSmooth);
         if (gLayer.sdf > edgeSlack) continue;
 
-        float bodyCov = smoothstep(edgeSlack, -0.008, gLayer.sdf);
+        float bodyCov = smoothstep(edgeSlack, mix(-0.008, -0.0025, earTipFade), gLayer.sdf);
         vec2 fiberPos = pLayer - combLocal * (h * 0.010) + vec2(h * 0.012, -h * 0.009);
         float fiber = sampleFurFiber(fiberPos, effDir, effClump);
 
@@ -917,8 +932,9 @@ void main() {
           // Crisp separated spiky tips when bristled (higher tip sharpening, zero blobs!)
           float troughParting = toothTrough * h * 0.13 + localRuffle * h * 0.08;
           float threshold = h * (0.76 + localRuffle * 0.06) + troughParting;
-          float strand = smoothstep(threshold, threshold + mix(0.23, 0.16, localRuffle), fiber);
-          float edgeSoft = mix(0.62, 1.0, smoothstep(0.006, -0.025, gLayer.sdf));
+          // Velvety dense micro-fuzz on ear tips (smooth continuous coverage without ragged holes!)
+          float strand = mix(smoothstep(threshold, threshold + mix(0.23, 0.16, localRuffle), fiber), smoothstep(h * 0.52, h * 0.52 + 0.34, fiber), earTipFade * 0.72);
+          float edgeSoft = mix(mix(0.62, 0.92, earTipFade), 1.0, smoothstep(0.006, -0.025, gLayer.sdf));
           layerAlpha = strand * bodyCov * edgeSoft * (0.34 + 0.28 * (1.0 - h));
         }
 
@@ -961,110 +977,6 @@ void main() {
       }
 
       sceneCol = sceneCol * (1.0 - accumAlpha) + accumCol;
-    }
-
-    // 3.5) Soft, Cute & Natural Top-Down Feline Face (tucked gracefully on the short round apple face!)
-    if (gHere.headMask > 0.02 || length(gHere.headLocal) < 0.16) {
-      vec2 hp = gHere.headLocal;
-      float faceMask = smoothstep(0.012, -0.026, gHere.sdf);
-
-      // Muted natural organic iris hues
-      vec3 irisCol = (uPatternType == 5 || uPatternType == 6)
-        ? vec3(0.45, 0.64, 0.82)
-        : (uPatternType == 0 || uPatternType == 1 || uPatternType == 2 || uPatternType == 4)
-        ? vec3(0.68, 0.52, 0.24)
-        : vec3(0.46, 0.62, 0.42);
-
-      // A) Recessed Soft Cat Eyes tucked neatly along the front cheek curve (hp.x = -0.068)
-      for (int side = -1; side <= 1; side += 2) {
-        float sy = float(side);
-        vec2 eyeCenter = vec2(-0.068, sy * 0.036);
-        vec2 ep = rot2d(hp - eyeCenter, -sy * 0.24);
-
-        // Soft recessed eye-socket shadow
-        float socketAO = exp(-dot(ep / vec2(0.020, 0.024), ep / vec2(0.020, 0.024))) * faceMask;
-        sceneCol *= 1.0 - socketAO * 0.22;
-
-        // Gentle curved sleeping lash line ("弯弯眯眯眼") when resting/being petted
-        float lidCurve = ep.x - (ep.y * ep.y * 8.5 - 0.0015);
-        float closedArc = smoothstep(0.0032, 0.0007, abs(lidCurve)) * smoothstep(0.018, 0.005, abs(ep.y)) * faceMask;
-
-        if (uEyeSquint > 0.62) {
-          float sleepBlend = smoothstep(0.62, 0.80, uEyeSquint);
-          vec3 lashCol = applyAtmosphere(vec3(0.11, 0.09, 0.08), bgBeam * 0.35, bgRain);
-          sceneCol = mix(sceneCol, lashCol, closedArc * 0.52 * sleepBlend);
-        }
-
-        if (uEyeSquint < 0.76) {
-          float openFactor = 1.0 - smoothstep(0.48, 0.76, uEyeSquint);
-          float openX = mix(0.0145, 0.0052, uEyeSquint);
-          float openY = 0.0185;
-          float eyeDist = length(vec2(ep.x / openX, ep.y / openY));
-
-          float rimMask = smoothstep(1.16, 0.88, eyeDist) * openFactor * faceMask;
-          vec3 rimCol = applyAtmosphere(vec3(0.10, 0.08, 0.08), bgBeam * 0.35, bgRain);
-          sceneCol = mix(sceneCol, rimCol, rimMask * 0.38);
-
-          if (eyeDist < 1.0) {
-            float eyeCov = smoothstep(1.0, 0.68, eyeDist) * openFactor * faceMask;
-            float limbal = smoothstep(0.55, 1.0, eyeDist);
-            vec3 eyeCol = irisCol * (0.95 - limbal * 0.45);
-
-            float pW = mix(0.60, 0.80, uPupilDilation);
-            float pH = mix(0.68, 0.82, uPupilDilation);
-            float pupilDist = length(vec2(ep.x / (openX * pW), ep.y / (openY * pH)));
-            float pupilCov = smoothstep(1.0, 0.68, pupilDist);
-            eyeCol = mix(eyeCol, vec3(0.035, 0.032, 0.042), pupilCov);
-
-            float browShadow = smoothstep(-0.004, 0.012, ep.x);
-            eyeCol *= 1.0 - browShadow * 0.52;
-
-            vec2 g1 = (ep - vec2(-openX * 0.20, -openY * 0.22)) / vec2(0.0034, 0.0038);
-            float glint1 = exp(-dot(g1, g1));
-            vec2 g2 = (ep - vec2(openX * 0.22, openY * 0.24)) / vec2(0.0018, 0.0020);
-            float glint2 = exp(-dot(g2, g2)) * 0.35;
-            eyeCol = applyAtmosphere(eyeCol, bgBeam * 0.45, bgRain) + vec3(0.96, 0.97, 1.0) * (glint1 * 0.82 + glint2);
-
-            sceneCol = mix(sceneCol, eyeCol, eyeCov);
-          }
-        }
-      }
-
-      // B) Tiny Delicate Matte-Velvet Cat Nose tucked right at the short round front curve!
-      vec2 np = hp - vec2(-0.098, 0.001);
-      float noseW = max(0.0028, 0.0066 - (np.x + 0.004) * 0.45);
-      float noseSdf = length(vec2(np.x / 0.0050, np.y / noseW)) - 1.0;
-      float noseCov = smoothstep(0.22, -0.22, noseSdf) * faceMask;
-      if (noseCov > 0.005) {
-        float isDarkNose = (uPatternType == 0 && dot(uPrimaryColor, vec3(1.0)) < 0.5) || uPatternType == 5 ? 1.0 : 0.0;
-        vec3 noseBase = mix(vec3(0.72, 0.48, 0.48), vec3(0.14, 0.12, 0.13), isDarkNose);
-        float noseShade = 0.78 + 0.26 * smoothstep(0.004, -0.004, np.x);
-        float noseGlint = exp(-dot((np - vec2(-0.0015, -0.0015)) / vec2(0.0026, 0.0030), (np - vec2(-0.0015, -0.0015)) / vec2(0.0026, 0.0030))) * 0.15;
-        vec3 noseCol = applyAtmosphere(noseBase * noseShade, bgBeam * 0.45, bgRain) + vec3(0.95, 0.90, 0.88) * noseGlint;
-        sceneCol = mix(sceneCol, noseCol, noseCov * 0.84);
-      }
-
-      // C) Ultra-Fine Translucent Whiskers Fanning Outward from Cheeks (never crossing eyes!)
-      float whiskerAlpha = 0.0;
-      for (int side = -1; side <= 1; side += 2) {
-        float sy = float(side);
-        vec2 wp = hp - vec2(-0.090, sy * 0.020);
-        wp.y *= sy;
-        if (wp.y > 0.006 && wp.y < 0.118 && wp.x > -0.045 && wp.x < 0.045) {
-          for (int w = 0; w < 3; w++) {
-            float fw = float(w) - 1.0;
-            float curveX = fw * 0.006 + wp.y * (-0.08 + fw * 0.13) + wp.y * wp.y * 0.40;
-            float distW = abs(wp.x - curveX);
-            float taper = smoothstep(0.112 - abs(fw) * 0.015, 0.012, wp.y) * smoothstep(0.006, 0.022, wp.y);
-            float line = smoothstep(0.0013, 0.0003, distW) * taper;
-            whiskerAlpha = max(whiskerAlpha, line);
-          }
-        }
-      }
-      if (whiskerAlpha > 0.01) {
-        vec3 whiskCol = applyAtmosphere(vec3(0.96, 0.94, 0.90), bgBeam * 0.60, bgRain);
-        sceneCol = mix(sceneCol, whiskCol, whiskerAlpha * 0.34);
-      }
     }
   }
 
