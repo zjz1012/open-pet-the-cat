@@ -6,7 +6,7 @@
     <title>Open Pet the Cat — 开源 WebGL2 真实撸猫模拟器</title>
     <meta
       name="description"
-      content="开源 2.5D WebGL2 实时撸猫模拟器：20层体积毛发梳理着色器、指尖压陷软体物理、14种猫咪花色与 Web Audio 呼噜声。"
+      content="开源 2.5D WebGL2 实时撸猫模拟器：20层体积毛发、拍猫屁股果冻回弹、木质排梳攒毛球、激光笔追逐、雨天 ASMR、自定义涂鸦捏猫与拍立得分享。"
     />
     <link
       rel="icon"
@@ -22,40 +22,169 @@
           class="stage"
           role="application"
           tabindex="0"
-          aria-label="抚摸猫咪舞台：滑动或按住抚摸，按空格键自动抚摸，按 T 切换月光模式"
-          aria-keyshortcuts="Space Enter T"
+          aria-label="抚摸猫咪舞台：滑动抚摸，轻点屁股拍打，1-4切换道具，Space自动抚摸，T切换天气"
+          aria-keyshortcuts="Space Enter T 1 2 3 4"
         >
           <canvas id="scene" aria-hidden="true"></canvas>
 
-          <button
-            id="theme-toggle"
-            class="stage-fab"
-            type="button"
-            role="switch"
-            aria-checked="false"
-            aria-label="月光模式 (快捷键 T)"
-            title="月光模式 (T)"
-          >
-            <svg class="icon icon-moon" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                d="M20.2 14.4A8.5 8.5 0 0 1 9.6 3.8a8.5 8.5 0 1 0 10.6 10.6Z"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.8"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-            <svg class="icon icon-sun" viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8" />
-              <path
-                d="M12 2.8v2.2M12 19v2.2M4.8 4.8l1.6 1.6M17.6 17.6l1.6 1.6M2.8 12H5M19 12h2.2M4.8 19.2l1.6-1.6M17.6 6.4l1.6-1.6"
-                stroke="currentColor"
-                stroke-width="1.8"
-                stroke-linecap="round"
-              />
-            </svg>
-          </button>
+          <!-- Top-left sleek tool switcher -->
+          <div class="stage-bar stage-bar-left" role="toolbar" aria-label="互动道具">
+            <button class="tool-pill" type="button" data-tool="hand" aria-pressed="true" title="徒手撸猫 / 轻点拍屁股 (1)">
+              <svg class="icon-sm" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M7 12V6.5a1.5 1.5 0 0 1 3 0V11m0-5.5a1.5 1.5 0 0 1 3 0V11m0-4.5a1.5 1.5 0 0 1 3 0V12m0-3.5a1.5 1.5 0 0 1 3 0V14a6 6 0 0 1-6 6h-1.2a6 6 0 0 1-4.8-2.4L4.7 14.3a1.5 1.5 0 0 1 2.3-1.9"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.75"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span>撸猫</span>
+            </button>
+
+            <button class="tool-pill" type="button" data-tool="comb" aria-pressed="false" title="木质排梳 · 留梳痕攒毛球 (2)">
+              <svg class="icon-sm" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M4 15.5h16a2 2 0 0 0 0-4H4a2 2 0 0 0 0 4ZM6.5 11.5V6M9.5 11.5V6M12.5 11.5V6M15.5 11.5V6M18 11.5V6"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.75"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span>排梳</span>
+            </button>
+
+            <button class="tool-pill" type="button" data-tool="laser" aria-pressed="false" title="红点激光笔 · 猫头追踪扑咬 (3)">
+              <svg class="icon-sm" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="3" fill="currentColor" />
+                <circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2.5 3" />
+              </svg>
+              <span>激光</span>
+            </button>
+
+            <button class="tool-pill" type="button" data-tool="paint" aria-pressed="false" title="涂鸦捏猫 · 定制你家的猫 (4)">
+              <svg class="icon-sm" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M18.4 4.6a2.1 2.1 0 0 1 3 3L11 18l-4 1 1-4L18.4 4.6Z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.75"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span>捏猫</span>
+            </button>
+
+            <button id="clear-furballs" class="tool-pill tool-pill-subtle" type="button" hidden title="清扫垫子上的浮毛球">
+              <span>扫毛球</span>
+              <span id="furball-badge" class="badge">0</span>
+            </button>
+          </div>
+
+          <!-- Top-right atmosphere + Polaroid + Share controls -->
+          <div class="stage-bar stage-bar-right">
+            <button
+              id="snapshot-btn"
+              class="stage-fab"
+              type="button"
+              aria-label="拍立得留念"
+              title="拍立得留念（导出合照）"
+            >
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M4.5 8.5h3l1.5-2h6l1.5 2h3A1.5 1.5 0 0 1 21 10v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18v-8a1.5 1.5 0 0 1 1.5-1.5Z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.7"
+                  stroke-linejoin="round"
+                />
+                <circle cx="12" cy="13.8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7" />
+              </svg>
+            </button>
+
+            <button
+              id="share-btn"
+              class="stage-fab"
+              type="button"
+              aria-label="复制专属分享链接"
+              title="复制专属撸猫链接"
+            >
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M10 13.5a4.5 4.5 0 0 0 6.4 0l2.2-2.2a4.5 4.5 0 0 0-6.4-6.4L11 6.1M14 10.5a4.5 4.5 0 0 0-6.4 0l-2.2 2.2a4.5 4.5 0 1 0 6.4 6.4l1.2-1.2"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.7"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
+
+            <button
+              id="theme-toggle"
+              class="stage-fab stage-fab-wide"
+              type="button"
+              aria-label="切换氛围：晴日 / 雨天午后 / 月光 (快捷键 T)"
+              title="切换氛围：晴日 / 雨天午后 / 月光 (T)"
+            >
+              <svg class="icon icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8" />
+                <path
+                  d="M12 2.8v2.2M12 19v2.2M4.8 4.8l1.6 1.6M17.6 17.6l1.6 1.6M2.8 12H5M19 12h2.2M4.8 19.2l1.6-1.6M17.6 6.4l1.6-1.6"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                />
+              </svg>
+              <svg class="icon icon-rain" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M6.5 14.5h10.8a3.7 3.7 0 0 0 .5-7.3A5.2 5.2 0 0 0 7.7 6.4 3.9 3.9 0 0 0 6.5 14.5Z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.75"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M8.5 17.5 7.5 20M12.5 17.5 11.5 20M16.5 17.5 15.5 20"
+                  stroke="currentColor"
+                  stroke-width="1.75"
+                  stroke-linecap="round"
+                />
+              </svg>
+              <svg class="icon icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M20.2 14.4A8.5 8.5 0 0 1 9.6 3.8a8.5 8.5 0 1 0 10.6 10.6Z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span id="atmosphere-label" class="fab-label">晴日</span>
+            </button>
+          </div>
+
+          <!-- Floating Paint Studio bar (visible only in Paint mode) -->
+          <div id="paint-studio" class="paint-studio" hidden role="toolbar" aria-label="涂鸦花色工具栏">
+            <div id="paint-colors" class="paint-colors"></div>
+            <span class="paint-divider" aria-hidden="true"></span>
+            <button id="paint-eraser" class="paint-action" type="button" aria-pressed="false" title="橡皮擦">
+              橡皮
+            </button>
+            <label class="paint-size-wrap" title="画笔大小">
+              <span>笔刷</span>
+              <input id="paint-size" type="range" min="6" max="32" step="2" value="16" />
+            </label>
+            <button id="paint-clear" class="paint-action" type="button" title="清空所有涂鸦">清空</button>
+          </div>
+
+          <!-- Ephemeral gentle toast -->
+          <div id="stage-toast" class="stage-toast" role="status" aria-live="polite" hidden></div>
 
           <div id="webgl-fallback" class="fallback" hidden>
             <p>当前浏览器未启用 WebGL2，无法渲染实时毛发舞台。</p>
@@ -118,8 +247,8 @@
               type="button"
               role="switch"
               aria-checked="false"
-              aria-label="呼噜声开关"
-              title="呼噜声"
+              aria-label="呼噜声与雨声白噪音开关"
+              title="呼噜声 / 雨声 ASMR"
             >
               <svg class="icon icon-sound-off" viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -189,7 +318,9 @@
         <footer class="footer">
           <span id="breed-caption" class="breed-caption">三花猫 · Calico</span>
           <span class="sep" aria-hidden="true">·</span>
-          <span class="hint">按住或滑动抚摸 · <kbd>Space</kbd> 自动撸猫 · <kbd>T</kbd> 月光</span>
+          <span class="hint">
+            轻点拍屁股 · 逆毛会炸毛 · <kbd>1-4</kbd> 换道具 · <kbd>Space</kbd> 自动撸 · <kbd>T</kbd> 晴/雨/夜
+          </span>
         </footer>
       </section>
     </main>

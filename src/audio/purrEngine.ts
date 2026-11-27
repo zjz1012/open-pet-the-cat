@@ -1,17 +1,18 @@
 /**
- * Procedural Web Audio API Cat Purring Engine
+ * Procedural Web Audio API Cat & Ambience Engine (v2.0)
  *
- * Real cat purring is generated during both inhalation and exhalation via
- * ~22–28 Hz laryngeal muscle contractions modulating soft respiratory airflow
- * and low chest-cavity formant resonances.
- *
- * Zero audio asset downloads, zero licensing concerns, continuous organic
- * response to petting speed, pressure, and breed resonance.
+ * Synthesizes everything in real time with zero external audio downloads:
+ * 1. Dual-phase respiratory cat purring (22–28 Hz throat modulation + breath noise)
+ * 2. Rainy Afternoon ASMR ambience (layered soft window rainwash + random raindrops)
+ * 3. Bongo-butt patting cushioned low-frequency thump
+ * 4. Soft content trill-meow & gentle warning hiss when ruffled against the grain
+ * 5. Subtle comb grooming brush whisper
  */
 export class PurrEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private purrEnvGain: GainNode | null = null;
+  private rainGain: GainNode | null = null;
   private baseOsc: OscillatorNode | null = null;
   private subHarmonicOsc: OscillatorNode | null = null;
   private pulseOsc: OscillatorNode | null = null;
@@ -27,6 +28,12 @@ export class PurrEngine {
   private currentIntensity = 0;
   private currentSpeed = 0;
 
+  private targetRainLevel = 0;
+  private currentRainLevel = 0;
+  private dropletTimer = 0;
+  private lastMeowTime = -10;
+  private lastHissTime = -10;
+
   public isEnabled(): boolean {
     return this.enabled;
   }
@@ -41,6 +48,10 @@ export class PurrEngine {
     }
   }
 
+  public setRainAmbience(active: boolean): void {
+    this.targetRainLevel = active ? 1.0 : 0.0;
+  }
+
   public async setEnabled(next: boolean): Promise<void> {
     this.enabled = next;
     if (next) {
@@ -52,7 +63,7 @@ export class PurrEngine {
     if (this.ctx && this.masterGain) {
       const now = this.ctx.currentTime;
       this.masterGain.gain.cancelScheduledValues(now);
-      this.masterGain.gain.setTargetAtTime(next ? 0.85 : 0.0, now, 0.18);
+      this.masterGain.gain.setTargetAtTime(next ? 0.88 : 0.0, now, 0.18);
     }
   }
 
@@ -66,25 +77,27 @@ export class PurrEngine {
 
   private ensureInitialized(): void {
     if (this.initialized) return;
-    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!AudioCtx) return;
 
     const ctx = new AudioCtx();
     this.ctx = ctx;
 
-    // Master output with gentle warmth lowpass
     const masterGain = ctx.createGain();
     masterGain.gain.value = 0;
+    masterGain.connect(ctx.destination);
+
+    // ----- 1) Purr Bus -----
     const finalWarmth = ctx.createBiquadFilter();
     finalWarmth.type = 'lowpass';
     finalWarmth.frequency.value = 460;
     finalWarmth.Q.value = 0.7;
 
-    // Envelope controlled every frame by breath cycle + petting pleasure
     const purrEnvGain = ctx.createGain();
     purrEnvGain.gain.value = 0;
 
-    // 1) Low throaty fundamental + 2nd harmonic
     const baseOsc = ctx.createOscillator();
     baseOsc.type = 'triangle';
     baseOsc.frequency.value = this.baseHz;
@@ -98,7 +111,6 @@ export class PurrEngine {
     const harmonicGain = ctx.createGain();
     harmonicGain.gain.value = 0.16;
 
-    // Organic slight pitch flutter (0.35 Hz LFO)
     const flutterLfo = ctx.createOscillator();
     flutterLfo.type = 'sine';
     flutterLfo.frequency.value = 0.37;
@@ -118,10 +130,9 @@ export class PurrEngine {
     harmonicGain.connect(chestFilter);
     chestFilter.connect(purrEnvGain);
 
-    // 2) Glottal-modulated filtered brown/pink breath noise (gives authentic fur/throat rattle)
-    const noiseBuffer = this.createBrownNoiseBuffer(ctx, 3.0);
+    const brownBuffer = this.createNoiseBuffer(ctx, 3.5, 'brown');
     const noiseSource = ctx.createBufferSource();
-    noiseSource.buffer = noiseBuffer;
+    noiseSource.buffer = brownBuffer;
     noiseSource.loop = true;
 
     const noiseFilter = ctx.createBiquadFilter();
@@ -129,7 +140,6 @@ export class PurrEngine {
     noiseFilter.frequency.value = 175;
     noiseFilter.Q.value = 1.1;
 
-    // Amplitude-modulate the breath noise at the purr frequency (~25 Hz)
     const noiseModGain = ctx.createGain();
     noiseModGain.gain.value = 0.48;
 
@@ -142,7 +152,6 @@ export class PurrEngine {
     pulseOsc.connect(pulseDepth);
     pulseDepth.connect(noiseModGain.gain);
 
-    // Subtle soft higher-frequency fur/breath airiness
     const airFilter = ctx.createBiquadFilter();
     airFilter.type = 'bandpass';
     airFilter.frequency.value = 340;
@@ -160,16 +169,41 @@ export class PurrEngine {
 
     purrEnvGain.connect(finalWarmth);
     finalWarmth.connect(masterGain);
-    masterGain.connect(ctx.destination);
+
+    // ----- 2) Rainy Afternoon Window ASMR Bus -----
+    const pinkBuffer = this.createNoiseBuffer(ctx, 4.0, 'pink');
+    const rainSource = ctx.createBufferSource();
+    rainSource.buffer = pinkBuffer;
+    rainSource.loop = true;
+
+    // Muffled indoor window-pane steady rainwash
+    const rainLow = ctx.createBiquadFilter();
+    rainLow.type = 'lowpass';
+    rainLow.frequency.value = 1350;
+    rainLow.Q.value = 0.55;
+
+    const rainHigh = ctx.createBiquadFilter();
+    rainHigh.type = 'highpass';
+    rainHigh.frequency.value = 260;
+
+    const rainGain = ctx.createGain();
+    rainGain.gain.value = 0;
+
+    rainSource.connect(rainHigh);
+    rainHigh.connect(rainLow);
+    rainLow.connect(rainGain);
+    rainGain.connect(masterGain);
 
     baseOsc.start();
     subHarmonicOsc.start();
     flutterLfo.start();
     pulseOsc.start();
     noiseSource.start();
+    rainSource.start();
 
     this.masterGain = masterGain;
     this.purrEnvGain = purrEnvGain;
+    this.rainGain = rainGain;
     this.baseOsc = baseOsc;
     this.subHarmonicOsc = subHarmonicOsc;
     this.pulseOsc = pulseOsc;
@@ -178,19 +212,39 @@ export class PurrEngine {
     this.initialized = true;
   }
 
-  private createBrownNoiseBuffer(ctx: AudioContext, seconds: number): AudioBuffer {
+  private createNoiseBuffer(ctx: AudioContext, seconds: number, kind: 'brown' | 'pink' | 'white'): AudioBuffer {
     const sampleRate = ctx.sampleRate;
     const length = Math.floor(sampleRate * seconds);
     const buffer = ctx.createBuffer(1, length, sampleRate);
     const data = buffer.getChannelData(0);
 
-    let last = 0;
-    for (let i = 0; i < length; i++) {
-      const white = Math.random() * 2 - 1;
-      last = (last + 0.06 * white) / 1.06;
-      data[i] = Math.max(-1, Math.min(1, last * 4.2));
+    if (kind === 'white') {
+      for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+    } else if (kind === 'brown') {
+      let last = 0;
+      for (let i = 0; i < length; i++) {
+        const white = Math.random() * 2 - 1;
+        last = (last + 0.06 * white) / 1.06;
+        data[i] = Math.max(-1, Math.min(1, last * 4.2));
+      }
+    } else {
+      // Paul Kellet's pink noise filter
+      let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+      for (let i = 0; i < length; i++) {
+        const white = Math.random() * 2 - 1;
+        b0 = 0.99886 * b0 + white * 0.0555179;
+        b1 = 0.99332 * b1 + white * 0.0750759;
+        b2 = 0.96900 * b2 + white * 0.1538520;
+        b3 = 0.86650 * b3 + white * 0.3104856;
+        b4 = 0.55000 * b4 + white * 0.5329522;
+        b5 = -0.7616 * b5 - white * 0.0168980;
+        const pink = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
+        b6 = white * 0.115926;
+        data[i] = Math.max(-1, Math.min(1, pink * 0.14));
+      }
     }
-    // Crossfade end into start for seamless looping
+
+    // Seamless crossfade loop
     const fade = Math.min(2048, Math.floor(length * 0.05));
     for (let i = 0; i < fade; i++) {
       const t = i / fade;
@@ -199,49 +253,196 @@ export class PurrEngine {
     return buffer;
   }
 
-  /**
-   * Call once per animation frame.
-   * @param dt Delta time in seconds
-   * @param contentment 0..1 petting pleasure level
-   * @param strokeSpeed 0..1 normalized hand stroking speed
-   * @param isHeadZone 0..1 whether petting head/ears/chin (extra deep purr)
-   */
-  public update(dt: number, contentment: number, strokeSpeed: number, isHeadZone: number): void {
-    // Advance dual-phase respiratory purr cycle (~2.8s per full inhale+exhale)
+  /** Soft cushioned hollow "bongo" pat on the cat's plump rump */
+  public playButtPat(combo = 0): void {
+    if (!this.enabled || !this.initialized || !this.ctx || !this.masterGain) return;
+    if (this.ctx.state !== 'running') return;
+
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    const baseFreq = 92 + Math.min(combo, 8) * 5.5 + (Math.random() - 0.5) * 6;
+    osc.frequency.setValueAtTime(baseFreq * 1.45, now);
+    osc.frequency.exponentialRampToValueAtTime(baseFreq * 0.62, now + 0.095);
+
+    const thumpGain = ctx.createGain();
+    thumpGain.gain.setValueAtTime(0.001, now);
+    thumpGain.gain.linearRampToValueAtTime(0.36, now + 0.009);
+    thumpGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 260;
+
+    osc.connect(lp);
+    lp.connect(thumpGain);
+    thumpGain.connect(this.masterGain);
+
+    osc.start(now);
+    osc.stop(now + 0.14);
+  }
+
+  /** Gentle content feline trill / soft "mrrp-meow" */
+  public playSoftMeow(): void {
+    if (!this.enabled || !this.initialized || !this.ctx || !this.masterGain) return;
+    if (this.ctx.state !== 'running') return;
+    const now = this.ctx.currentTime;
+    if (now - this.lastMeowTime < 3.2) return;
+    this.lastMeowTime = now;
+
+    const ctx = this.ctx;
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    const pitchScale = this.baseHz / 25.0;
+    const startF = 440 * pitchScale;
+    const peakF = 680 * pitchScale;
+    const endF = 490 * pitchScale;
+
+    osc.frequency.setValueAtTime(startF, now);
+    osc.frequency.exponentialRampToValueAtTime(peakF, now + 0.14);
+    osc.frequency.exponentialRampToValueAtTime(endF, now + 0.34);
+
+    // Subtle trill vibrato
+    const trill = ctx.createOscillator();
+    trill.frequency.value = 27;
+    const trillGain = ctx.createGain();
+    trillGain.gain.value = 18;
+    trill.connect(trillGain);
+    trillGain.connect(osc.frequency);
+
+    const formant = ctx.createBiquadFilter();
+    formant.type = 'bandpass';
+    formant.frequency.setValueAtTime(950, now);
+    formant.frequency.linearRampToValueAtTime(1450, now + 0.15);
+    formant.frequency.linearRampToValueAtTime(820, now + 0.34);
+    formant.Q.value = 2.6;
+
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, now);
+    env.gain.linearRampToValueAtTime(0.14, now + 0.05);
+    env.gain.exponentialRampToValueAtTime(0.0001, now + 0.38);
+
+    osc.connect(formant);
+    formant.connect(env);
+    env.connect(this.masterGain);
+
+    osc.start(now);
+    trill.start(now);
+    osc.stop(now + 0.40);
+    trill.stop(now + 0.40);
+  }
+
+  /** Brief feline warning hiss when annoyed by rough against-grain rubbing */
+  public playHiss(): void {
+    if (!this.enabled || !this.initialized || !this.ctx || !this.masterGain) return;
+    if (this.ctx.state !== 'running') return;
+    const now = this.ctx.currentTime;
+    if (now - this.lastHissTime < 1.8) return;
+    this.lastHissTime = now;
+
+    const ctx = this.ctx;
+    const buf = this.createNoiseBuffer(ctx, 0.42, 'white');
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(3400, now);
+    bp.frequency.exponentialRampToValueAtTime(2100, now + 0.36);
+    bp.Q.value = 1.6;
+
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.001, now);
+    env.gain.linearRampToValueAtTime(0.16, now + 0.03);
+    env.gain.exponentialRampToValueAtTime(0.001, now + 0.36);
+
+    src.connect(bp);
+    bp.connect(env);
+    env.connect(this.masterGain);
+
+    src.start(now);
+    src.stop(now + 0.38);
+  }
+
+  private playRainDroplet(): void {
+    if (!this.ctx || !this.masterGain || this.currentRainLevel < 0.15) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    const f0 = 720 + Math.random() * 980;
+    osc.frequency.setValueAtTime(f0, now);
+    osc.frequency.exponentialRampToValueAtTime(f0 * 0.55, now + 0.045);
+
+    const g = ctx.createGain();
+    const vol = (0.008 + Math.random() * 0.015) * this.currentRainLevel;
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.linearRampToValueAtTime(vol, now + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.055);
+
+    osc.connect(g);
+    g.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.06);
+  }
+
+  public update(
+    dt: number,
+    contentment: number,
+    strokeSpeed: number,
+    isHeadZone: number,
+    annoyance = 0,
+  ): void {
     const cycleSpeed = 0.34 + contentment * 0.05;
     this.breathPhase = (this.breathPhase + dt * cycleSpeed) % 1.0;
 
-    // Gentle idle purr when sound is on (soft sleeping rumble), rises richly when petted
-    this.targetIntensity = 0.14 + contentment * 0.86;
-    const smoothRate = this.targetIntensity > this.currentIntensity ? 2.4 : 0.75;
+    // Irritated cat temporarily stops purring!
+    const calmFactor = Math.max(0, 1 - annoyance * 1.45);
+    this.targetIntensity = (0.14 + contentment * 0.86) * calmFactor;
+    const smoothRate = this.targetIntensity > this.currentIntensity ? 2.4 : 1.1;
     this.currentIntensity += (this.targetIntensity - this.currentIntensity) * Math.min(1, dt * smoothRate);
     this.currentSpeed += (strokeSpeed - this.currentSpeed) * Math.min(1, dt * 5.0);
+
+    // Smooth rain crossfade
+    this.currentRainLevel += (this.targetRainLevel - this.currentRainLevel) * Math.min(1, dt * 2.2);
 
     if (!this.initialized || !this.enabled || !this.ctx || !this.purrEnvGain) return;
     if (this.ctx.state !== 'running') return;
 
-    // Shape inhale (0..0.46) and exhale (0.50..0.96) with natural soft pauses between phases
+    const now = this.ctx.currentTime;
+
+    if (this.rainGain) {
+      this.rainGain.gain.setTargetAtTime(this.currentRainLevel * 0.28, now, 0.12);
+      if (this.currentRainLevel > 0.2) {
+        this.dropletTimer -= dt;
+        if (this.dropletTimer <= 0) {
+          this.playRainDroplet();
+          this.dropletTimer = 0.18 + Math.random() * 0.55;
+        }
+      }
+    }
+
     let breathEnv = 0;
     let isInhale = true;
     if (this.breathPhase < 0.46) {
       const p = this.breathPhase / 0.46;
-      breathEnv = Math.sin(p * Math.PI);
-      breathEnv = Math.pow(breathEnv, 0.72);
+      breathEnv = Math.pow(Math.sin(p * Math.PI), 0.72);
       isInhale = true;
     } else if (this.breathPhase > 0.50 && this.breathPhase < 0.96) {
       const p = (this.breathPhase - 0.50) / 0.46;
-      breathEnv = Math.sin(p * Math.PI);
-      breathEnv = Math.pow(breathEnv, 0.85) * 0.84;
+      breathEnv = Math.pow(Math.sin(p * Math.PI), 0.85) * 0.84;
       isInhale = false;
     } else {
       breathEnv = 0.06;
     }
 
-    const now = this.ctx.currentTime;
-    const envLevel = this.currentIntensity * (0.12 + 0.88 * breathEnv) * (0.88 + this.currentSpeed * 0.22);
+    const envLevel =
+      this.currentIntensity * (0.12 + 0.88 * breathEnv) * (0.88 + this.currentSpeed * 0.22);
     this.purrEnvGain.gain.setTargetAtTime(envLevel, now, 0.04);
 
-    // Subtle tonal difference between inhale and exhale + head-petting warmth
     if (this.noiseFilter && this.chestFilter && this.pulseOsc) {
       const targetNoiseFreq = (isInhale ? 195 : 148) + this.currentSpeed * 38 - isHeadZone * 18;
       this.noiseFilter.frequency.setTargetAtTime(targetNoiseFreq, now, 0.08);

@@ -1,31 +1,68 @@
+export type ToolMode = 'hand' | 'comb' | 'laser' | 'paint';
+
 export interface Vec2 {
   x: number;
   y: number;
 }
 
+export interface Furball {
+  /** Position in stage UV (0..1) */
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  /** Visual radius in UV height units (0.015..0.036) */
+  radius: number;
+  /** RGB tint sampled from the breed that shed it */
+  color: [number, number, number];
+  /** Seed for fuzzy silhouette */
+  seed: number;
+}
+
+export interface PhysicsEvents {
+  /** Triggered when a bongo butt pat fires (value = combo count) */
+  buttPatCombo: number;
+  /** Triggered when cat purrs so happily it lets out a soft trill-meow */
+  softMeow: boolean;
+  /** Triggered when cat gets annoyed by against-grain rubbing / tail yanking */
+  hissPushback: boolean;
+  /** Triggered when grooming spawns a new shedding furball */
+  furballSpawned: boolean;
+}
+
 export interface CatPhysicsState {
   time: number;
-  /** 0..1 gentle ribcage expansion */
+  toolMode: ToolMode;
   breath: number;
-  /** 0..1 overall contentment (drives deeper purr & subtle tail tip wag) */
   contentment: number;
+  /** 0..1 feline irritability from rough against-grain rubbing / tail yanking */
+  annoyance: number;
+  /** 0..1 sudden feline dorsal skin twitch ripple */
+  skinTwitch: number;
   /** Cat size scale 0.65..1.14 */
   catSize: number;
   /** Torso chonkiness scale 0.80..1.40 */
   torsoWidth: number;
-  /** 0..1 left ear flatten/squish */
   leftEarSquish: number;
-  /** 0..1 right ear flatten/squish */
   rightEarSquish: number;
-  /** 0..1 head gentle downward press */
   headPress: number;
-  /** 0..1 lower-back/rump "elevator butt" lift */
   rumpLift: number;
-  /** 13 smooth Catmull-Rom subdivided tail points in cat-local space */
+  /** Head yaw angle (radians) when tracking laser pointer */
+  headYaw: number;
+  /** Forward crouch/pounce lunge when chasing laser dot (-0.02..+0.04) */
+  pounceOffset: number;
+  /** Active bongo butt-pat jelly ripple impulse */
+  patPos: Vec2;
+  patImpulse: number;
+  /** Laser dot position in stage UV & visibility */
+  laserPos: Vec2;
+  laserVisible: number;
+  /** Shedding furballs resting on the cushion (max 6) */
+  furballs: Furball[];
+  /** 13 smooth Catmull-Rom subdivided tail points */
   tailSpline: Vec2[];
-  /** 5 articulated tail control points in cat-local space */
   tailPoints: Vec2[];
-  /** Pointer & hand state in stage UV (0..1, y=0 top, y=1 bottom) */
+  /** Pointer & hand/comb kinematics in stage UV */
   handPos: Vec2;
   handVel: Vec2;
   handAngle: number;
@@ -34,24 +71,25 @@ export interface CatPhysicsState {
   isOverCat: boolean;
   isHeadZone: number;
   strokeSpeed: number;
-  /** Auto-petting keyboard mode (Space / Enter) */
   autoPetting: boolean;
 }
 
 /**
- * Spring-damper physics for tactile petting:
- * - Hand follow & press kinematics
- * - Independent left/right ear squishing when stroking head
- * - Rump "elevator butt" lift when stroking lower back
- * - 5-point articulated tail chain reacting to rump/tail petting & contentment
- * - Organic breathing & auto-petting keyboard loop
+ * Tactile Cat Behavior & Soft-Body Physics Engine (v2.0)
+ *
+ * - Real feline mood: gentle with-grain stroking -> deep contentment + occasional soft meow;
+ *   rough against-grain rubbing / tail yanking -> dorsal skin twitch, airplane ears,
+ *   rapid tail lash, and playful hiss pushback!
+ * - Bongo butt-patting: quick taps on rump/back inject soft-body jelly bounce + elevator butt!
+ * - Grooming comb: accumulates shedding progress and spawns interactive fuzzy furballs!
+ * - Laser pointer chase: cat head & ears smoothly track the red dot + hunter crouch/pounce!
  */
 export class CatPhysics {
   public readonly state: CatPhysicsState;
 
   private pointerActive = false;
   private pointerDown = false;
-  private pointerTarget: Vec2 = { x: 0.45, y: 0.50 };
+  private pointerTarget: Vec2 = { x: 0.52, y: 0.54 };
   private autoPetPhase = 0;
 
   // Spring velocities
@@ -60,9 +98,20 @@ export class CatPhysics {
   private headPressVel = 0;
   private rumpLiftVel = 0;
   private handPressVel = 0;
+  private headYawVel = 0;
+  private pounceVel = 0;
 
-  // Tail spring nodes (in cat-local space, origin at torso center, aspect-corrected)
-  // Cat faces LEFT (head around x=-0.31, rump around x=+0.20, tail gracefully curves rightward & down-left)
+  // Mood, twitch, hiss pushback & bongo-pat state
+  private pushbackTimer = 0;
+  private twitchPhase = 0;
+  private patCombo = 0;
+  private patComboTimer = 0;
+  private happyStreak = 0;
+  private pounceCooldown = 0;
+
+  // Grooming shedding accumulator
+  private shedAccumulator = 0;
+
   private tailRest: Vec2[] = [
     { x: 0.195, y: -0.005 },
     { x: 0.305, y: 0.002 },
@@ -76,14 +125,24 @@ export class CatPhysics {
     const initialPts = this.tailRest.map((p) => ({ ...p }));
     this.state = {
       time: 0,
+      toolMode: 'hand',
       breath: 0,
       contentment: 0,
+      annoyance: 0,
+      skinTwitch: 0,
       catSize: 1.0,
       torsoWidth: 1.0,
       leftEarSquish: 0,
       rightEarSquish: 0,
       headPress: 0,
       rumpLift: 0,
+      headYaw: 0,
+      pounceOffset: 0,
+      patPos: { x: 0.62, y: 0.54 },
+      patImpulse: 0,
+      laserPos: { x: 0.28, y: 0.54 },
+      laserVisible: 0,
+      furballs: [],
       tailSpline: this.sampleCatmullRom(initialPts, 13),
       tailPoints: initialPts,
       handPos: { x: 0.52, y: 0.56 },
@@ -131,6 +190,18 @@ export class CatPhysics {
     return out;
   }
 
+  public setToolMode(mode: ToolMode): void {
+    this.state.toolMode = mode;
+    if (mode === 'laser' || mode === 'paint') {
+      this.state.autoPetting = false;
+    }
+  }
+
+  public clearFurballs(): void {
+    this.state.furballs = [];
+    this.shedAccumulator = 0;
+  }
+
   public setProportions(sizeScale: number, widthScale: number): void {
     this.state.catSize = sizeScale;
     this.state.torsoWidth = widthScale;
@@ -141,7 +212,7 @@ export class CatPhysics {
     this.pointerTarget.y = Math.max(0.02, Math.min(0.98, v));
     this.pointerActive = active;
     this.pointerDown = down;
-    if (active && down) {
+    if (active && down && (this.state.toolMode === 'hand' || this.state.toolMode === 'comb')) {
       this.state.autoPetting = false;
     }
   }
@@ -152,6 +223,9 @@ export class CatPhysics {
   }
 
   public toggleAutoPet(): boolean {
+    if (this.state.toolMode === 'laser' || this.state.toolMode === 'paint') {
+      this.state.toolMode = 'hand';
+    }
     this.state.autoPetting = !this.state.autoPetting;
     return this.state.autoPetting;
   }
@@ -160,10 +234,27 @@ export class CatPhysics {
     this.state.autoPetting = true;
   }
 
-  /**
-   * Convert stage UV (0..1, 0..1) into cat-local coordinates where
-   * (0, 0) is center of the cat's torso, x is right, y is down.
-   */
+  /** Trigger a bouncy bongo butt-pat at stage UV (u, v) if over the cat's back/rump */
+  public triggerTap(u: number, v: number, aspect: number): number {
+    if (this.state.toolMode !== 'hand') return 0;
+    const local = this.stageToCatLocal(u, v, aspect);
+    const hit = this.hitTestCat(local);
+    if (hit.zone === 'rump' || hit.zone === 'back') {
+      this.patCombo = this.patComboTimer > 0 ? Math.min(12, this.patCombo + 1) : 1;
+      this.patComboTimer = 1.25;
+      this.state.patPos.x = u;
+      this.state.patPos.y = v;
+      this.state.patImpulse = 1.0;
+      this.rumpLiftVel += hit.zone === 'rump' ? 5.2 : 2.8;
+      this.state.contentment = Math.min(1, this.state.contentment + 0.16);
+      // Tail perks up enthusiastically
+      this.tailVel[1].y -= 0.25;
+      this.tailVel[2].y -= 0.42;
+      return this.patCombo;
+    }
+    return 0;
+  }
+
   public stageToCatLocal(u: number, v: number, aspect: number): Vec2 {
     const centerX = 0.525;
     const centerY = 0.545;
@@ -174,30 +265,35 @@ export class CatPhysics {
     };
   }
 
-  /** Approximate hit-test for whether the hand is over the cat's body/head/tail */
+  public catLocalToStage(local: Vec2, aspect: number): Vec2 {
+    const centerX = 0.525;
+    const centerY = 0.545;
+    const s = Math.max(0.55, this.state.catSize);
+    return {
+      x: centerX + (local.x * s * 1.08) / Math.max(0.1, aspect),
+      y: centerY + local.y * s * 1.08,
+    };
+  }
+
   public hitTestCat(local: Vec2): { inside: boolean; zone: 'none' | 'head' | 'back' | 'rump' | 'tail' } {
     const w = this.state.torsoWidth;
-    // Head ellipse around (-0.33, -0.02)
-    const hx = (local.x + 0.33) / 0.145;
-    const hy = (local.y + 0.015) / 0.135;
+    const hx = (local.x + 0.305) / 0.145;
+    const hy = (local.y + 0.01) / 0.135;
     if (hx * hx + hy * hy <= 1.25) {
       return { inside: true, zone: 'head' };
     }
 
-    // Torso capsule from x=-0.24 to x=+0.22, scaled in y by torsoWidth
-    const tx = Math.max(-0.24, Math.min(0.22, local.x));
+    const tx = Math.max(-0.22, Math.min(0.205, local.x));
     const dx = local.x - tx;
-    const dy = (local.y - 0.0) / (0.145 * (0.35 + 0.65 * w));
-    if (dx * dx / (0.15 * 0.15) + dy * dy <= 1.35) {
-      if (local.x > 0.08) return { inside: true, zone: 'rump' };
+    const dy = local.y / (0.145 * (0.35 + 0.65 * w));
+    if ((dx * dx) / (0.15 * 0.15) + dy * dy <= 1.35) {
+      if (local.x > 0.06) return { inside: true, zone: 'rump' };
       return { inside: true, zone: 'back' };
     }
 
-    // Tail spline proximity
     const tp = this.state.tailPoints;
     for (let i = 0; i < tp.length - 1; i++) {
-      const d = this.distToSegment(local, tp[i], tp[i + 1]);
-      if (d < 0.085) {
+      if (this.distToSegment(local, tp[i], tp[i + 1]) < 0.085) {
         return { inside: true, zone: 'tail' };
       }
     }
@@ -210,30 +306,48 @@ export class CatPhysics {
     const vy = b.y - a.y;
     const lenSq = vx * vx + vy * vy + 1e-6;
     const t = Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.y - a.y) * vy) / lenSq));
-    const px = a.x + vx * t;
-    const py = a.y + vy * t;
-    return Math.hypot(p.x - px, p.y - py);
+    return Math.hypot(p.x - (a.x + vx * t), p.y - (a.y + vy * t));
   }
 
-  public step(dt: number, aspect: number): void {
+  public step(
+    dt: number,
+    aspect: number,
+    furLength: number,
+    breedColor: [number, number, number],
+  ): PhysicsEvents {
     const clampedDt = Math.min(dt, 0.05);
     const st = this.state;
     st.time += clampedDt;
 
-    // 1) Organic asymmetric breathing (slower & deeper when content)
-    const breathFreq = 0.25 - st.contentment * 0.03;
+    const events: PhysicsEvents = {
+      buttPatCombo: 0,
+      softMeow: false,
+      hissPushback: false,
+      furballSpawned: false,
+    };
+
+    // Decay transient impulse timers
+    if (this.patComboTimer > 0) this.patComboTimer = Math.max(0, this.patComboTimer - clampedDt);
+    st.patImpulse *= Math.exp(-clampedDt * 18.0);
+    if (this.pushbackTimer > 0) this.pushbackTimer = Math.max(0, this.pushbackTimer - clampedDt);
+    if (this.pounceCooldown > 0) this.pounceCooldown = Math.max(0, this.pounceCooldown - clampedDt);
+
+    // 1) Organic asymmetric breathing
+    const breathFreq = 0.25 - st.contentment * 0.03 + st.annoyance * 0.08;
     const rawBreath = 0.5 + 0.5 * Math.sin(st.time * Math.PI * 2 * breathFreq);
     st.breath = Math.pow(rawBreath, 1.35) * (0.72 + 0.28 * st.contentment);
 
-    // 2) Target hand position (either live pointer or gentle keyboard auto-petting)
+    // 2) Pointer & Tool Kinematics
+    const isTactileTool = st.toolMode === 'hand' || st.toolMode === 'comb';
+    const isLaserTool = st.toolMode === 'laser';
+
     let targetU = this.pointerTarget.x;
     let targetV = this.pointerTarget.y;
     let activeNow = this.pointerActive;
     let pressingNow = this.pointerDown;
 
-    if (st.autoPetting) {
+    if (st.autoPetting && isTactileTool) {
       this.autoPetPhase += clampedDt * 1.45;
-      // Smooth front-to-back petting stroke from head to rump and curving gently back
       const sweep = Math.sin(this.autoPetPhase);
       const lift = Math.cos(this.autoPetPhase);
       const s = st.catSize;
@@ -243,7 +357,12 @@ export class CatPhysics {
       pressingNow = lift > -0.35;
     }
 
-    // Smooth hand motion with subtle natural damping
+    // Playful hiss pushback gently nudges the hand away briefly
+    if (this.pushbackTimer > 0 && isTactileTool) {
+      targetV = Math.min(0.95, targetV + 0.14 * (this.pushbackTimer / 0.55));
+      pressingNow = false;
+    }
+
     const prevX = st.handPos.x;
     const prevY = st.handPos.y;
     const followK = 1 - Math.exp(-22 * clampedDt);
@@ -258,20 +377,24 @@ export class CatPhysics {
 
     const localHand = this.stageToCatLocal(st.handPos.x, st.handPos.y, aspect);
     const hit = this.hitTestCat(localHand);
-    st.isOverCat = activeNow && hit.inside;
+    st.isOverCat = isTactileTool && activeNow && hit.inside;
 
-    // Show hand gracefully when over cat (or actively pressing/auto-petting)
-    const wantVisible = activeNow && (hit.inside || pressingNow) ? 1.0 : 0.0;
-    const visRate = wantVisible > st.handVisibility ? 13.0 : 8.0;
+    // Show hand/comb when over cat or pushing furballs
+    const nearFurball =
+      isTactileTool &&
+      activeNow &&
+      st.furballs.some((fb) => Math.hypot((fb.x - st.handPos.x) * aspect, fb.y - st.handPos.y) < 0.14);
+
+    const wantVisible =
+      isTactileTool && activeNow && (hit.inside || pressingNow || nearFurball) ? 1.0 : 0.0;
+    const visRate = wantVisible > st.handVisibility ? 13.0 : 8.5;
     st.handVisibility += (wantVisible - st.handVisibility) * Math.min(1, clampedDt * visRate);
 
-    // Pivot angle from bottom-center-right edge like a person sitting beside the cushion
     const pivotX = 0.56;
     const pivotY = 1.24;
     const targetAngle = Math.atan2(st.handPos.x - pivotX, pivotY - st.handPos.y) * 0.72;
     st.handAngle += (targetAngle - st.handAngle) * Math.min(1, clampedDt * 12);
 
-    // Tactile press depth: hovering over cat softly grazes fur (0.28), pressing sinks in (1.0)
     const speedMag = Math.hypot(st.handVel.x, st.handVel.y);
     const grazing = st.isOverCat ? Math.min(0.45, 0.16 + speedMag * 0.25) : 0;
     const targetPress = st.isOverCat ? (pressingNow ? 1.0 : grazing) : 0.0;
@@ -282,47 +405,186 @@ export class CatPhysics {
     const normSpeed = Math.min(1.0, speedMag * 0.75);
     st.strokeSpeed += ((st.isOverCat ? normSpeed : 0) - st.strokeSpeed) * Math.min(1, clampedDt * 7);
 
-    // 3) Contentment rises while petting & slowly lingers after stopping
+    // 3) Feline Mood System (Contentment vs. Against-Grain Irritability & Skin Twitch!)
     const isActivelyPetting = st.isOverCat && (st.handPress > 0.25 || speedMag > 0.06);
-    const targetContent = isActivelyPetting ? 1.0 : 0.0;
-    const contentRate = isActivelyPetting ? 0.55 : 0.16;
+    // Natural torso fur grows left -> right (+X). Rubbing briskly right -> left (-X) is against the grain!
+    const againstGrainStroke =
+      isActivelyPetting &&
+      st.toolMode === 'hand' &&
+      (hit.zone === 'back' || hit.zone === 'rump') &&
+      st.handVel.x < -0.28 &&
+      st.handPress > 0.55;
+    const tailYank =
+      isActivelyPetting && hit.zone === 'tail' && speedMag > 0.35 && st.handPress > 0.55;
+
+    if (againstGrainStroke || tailYank) {
+      const rageRate = tailYank ? 0.85 : 0.58;
+      st.annoyance = Math.min(1.0, st.annoyance + clampedDt * rageRate);
+      // Trigger sudden cat dorsal skin twitch when rubbing against the grain!
+      if (st.annoyance > 0.28 && this.twitchPhase <= 0) {
+        this.twitchPhase = 1.0;
+      }
+      if (st.annoyance >= 0.94 && this.pushbackTimer <= 0) {
+        this.pushbackTimer = 0.55;
+        st.annoyance = 0.62;
+        events.hissPushback = true;
+      }
+    } else {
+      const calmRate = isActivelyPetting ? 0.28 : 0.42;
+      st.annoyance = Math.max(0, st.annoyance - clampedDt * calmRate);
+    }
+
+    // Crisp damped high-frequency dorsal skin twitch envelope
+    if (this.twitchPhase > 0) {
+      this.twitchPhase = Math.max(0, this.twitchPhase - clampedDt * 3.4);
+      st.skinTwitch = Math.sin(this.twitchPhase * Math.PI * 5.0) * this.twitchPhase;
+    } else {
+      st.skinTwitch = 0;
+    }
+
+    const happyNow = isActivelyPetting && st.annoyance < 0.25;
+    const targetContent = happyNow ? 1.0 : 0.0;
+    const contentRate = happyNow ? 0.55 : 0.16;
     st.contentment += (targetContent - st.contentment) * Math.min(1, clampedDt * contentRate);
 
-    // 4) Head & Independent Ear Squish Physics
-    const headDist = Math.hypot(localHand.x + 0.33, localHand.y + 0.015);
+    // Occasional soft content trill-meow after prolonged gentle petting
+    if (happyNow && st.contentment > 0.82 && normSpeed > 0.08) {
+      this.happyStreak += clampedDt;
+      if (this.happyStreak > 5.5) {
+        this.happyStreak = 0;
+        events.softMeow = true;
+      }
+    } else {
+      this.happyStreak = Math.max(0, this.happyStreak - clampedDt * 0.5);
+    }
+
+    // 4) Grooming Comb -> Shedding Furballs!
+    if (
+      st.toolMode === 'comb' &&
+      st.isOverCat &&
+      st.handPress > 0.45 &&
+      speedMag > 0.10 &&
+      furLength > 0.08
+    ) {
+      // Longer-haired cats shed much faster!
+      const shedRate = (0.14 + furLength * 0.65) * Math.min(1.5, speedMag);
+      this.shedAccumulator += clampedDt * shedRate;
+      if (this.shedAccumulator >= 1.0) {
+        this.shedAccumulator = 0;
+        this.spawnFurball(st.handPos, aspect, furLength, breedColor);
+        events.furballSpawned = true;
+      }
+    }
+
+    // Update interactive furballs on cushion (pushable by hand or comb!)
+    for (const fb of st.furballs) {
+      if (isTactileTool && activeNow) {
+        const dx = (fb.x - st.handPos.x) * aspect;
+        const dy = fb.y - st.handPos.y;
+        const d = Math.hypot(dx, dy);
+        const pushR = fb.radius + 0.055;
+        if (d < pushR && d > 0.001) {
+          const push = (1 - d / pushR) * 0.85;
+          fb.vx += ((dx / d) * push + st.handVel.x * 0.35) * clampedDt * 10;
+          fb.vy += ((dy / d) * push + st.handVel.y * 0.35) * clampedDt * 10;
+        }
+      }
+      fb.x += fb.vx * clampedDt;
+      fb.y += fb.vy * clampedDt;
+      const drag = Math.exp(-clampedDt * 6.5);
+      fb.vx *= drag;
+      fb.vy *= drag;
+      // Keep inside cushion frame softly
+      fb.x = Math.max(0.06, Math.min(0.94, fb.x));
+      fb.y = Math.max(0.10, Math.min(0.92, fb.y));
+    }
+
+    // 5) Laser Pointer Tracking & Hunter Pounce!
+    const wantLaser = isLaserTool && activeNow ? 1.0 : 0.0;
+    st.laserVisible += (wantLaser - st.laserVisible) * Math.min(1, clampedDt * 16);
+    if (isLaserTool && activeNow) {
+      // Natural tiny hand-tremor jitter makes the red laser dot look super real!
+      const jitterX = (Math.sin(st.time * 27.3) * 0.0022 + Math.cos(st.time * 41.7) * 0.0015);
+      const jitterY = (Math.cos(st.time * 31.1) * 0.0022 + Math.sin(st.time * 37.9) * 0.0015);
+      st.laserPos.x += (targetU + jitterX - st.laserPos.x) * Math.min(1, clampedDt * 24);
+      st.laserPos.y += (targetV + jitterY - st.laserPos.y) * Math.min(1, clampedDt * 24);
+    }
+
+    let targetYaw = 0;
+    let targetPounce = 0;
+    if (st.laserVisible > 0.25) {
+      const localLaser = this.stageToCatLocal(st.laserPos.x, st.laserPos.y, aspect);
+      const dx = localLaser.x - (-0.305);
+      const dy = localLaser.y - (-0.01);
+      const dist = Math.hypot(dx, dy);
+      // Cat faces -X (angle PI). Compute relative angle in [-PI, PI]
+      const rawAng = Math.atan2(dy, -dx);
+      targetYaw = Math.max(-0.55, Math.min(0.55, rawAng * 0.65));
+      // Subtle crouched readiness + playful forward pounce when dot is near front of face!
+      if (dist < 0.34 && dx < 0.02) {
+        if (this.pounceCooldown <= 0 && (this.pointerDown || dist < 0.21)) {
+          this.pounceVel += 0.62;
+          this.pounceCooldown = 1.1;
+        } else {
+          targetPounce = -0.014; // hunter crouch back
+        }
+      }
+    }
+
+    this.headYawVel += ((targetYaw - st.headYaw) * 65 - this.headYawVel * 10) * clampedDt;
+    st.headYaw = Math.max(-0.65, Math.min(0.65, st.headYaw + this.headYawVel * clampedDt));
+
+    this.pounceVel += ((targetPounce - st.pounceOffset) * 75 - this.pounceVel * 10.5) * clampedDt;
+    st.pounceOffset = Math.max(-0.025, Math.min(0.055, st.pounceOffset + this.pounceVel * clampedDt));
+
+    // 6) Head & Independent Ear Squish / Alert Airplane Ears
+    const headDist = Math.hypot(localHand.x + 0.305, localHand.y + 0.01);
     const headInfluence = st.isOverCat ? Math.max(0, 1 - headDist / 0.24) * st.handPress : 0;
     st.isHeadZone += (headInfluence - st.isHeadZone) * Math.min(1, clampedDt * 6);
 
-    // Left ear (top side, y < 0) vs Right ear (bottom side, y > 0)
-    const leftEarDist = Math.hypot(localHand.x + 0.34, localHand.y + 0.105);
-    const rightEarDist = Math.hypot(localHand.x + 0.34, localHand.y - 0.075);
+    const leftEarDist = Math.hypot(localHand.x + 0.32, localHand.y + 0.10);
+    const rightEarDist = Math.hypot(localHand.x + 0.32, localHand.y - 0.08);
 
-    const targetLeftEar = st.isOverCat
-      ? Math.min(1, Math.max(0, 1 - leftEarDist / 0.20) * st.handPress * 1.15 + headInfluence * 0.45)
-      : 0;
-    const targetRightEar = st.isOverCat
-      ? Math.min(1, Math.max(0, 1 - rightEarDist / 0.20) * st.handPress * 1.15 + headInfluence * 0.45)
-      : 0;
+    const airplaneBias = st.annoyance * 0.78;
+    const laserAlert = st.laserVisible > 0.3 ? -0.18 : 0; // ears perk forward when spotting laser!
 
-    // Spring-damper for soft squishy ears
+    const targetLeftEar =
+      (st.isOverCat
+        ? Math.min(1, Math.max(0, 1 - leftEarDist / 0.20) * st.handPress * 1.15 + headInfluence * 0.45)
+        : 0) +
+      airplaneBias +
+      laserAlert;
+    const targetRightEar =
+      (st.isOverCat
+        ? Math.min(1, Math.max(0, 1 - rightEarDist / 0.20) * st.handPress * 1.15 + headInfluence * 0.45)
+        : 0) +
+      airplaneBias +
+      laserAlert;
+
     this.leftEarVel += ((targetLeftEar - st.leftEarSquish) * 90 - this.leftEarVel * 11) * clampedDt;
-    st.leftEarSquish = Math.max(-0.08, Math.min(1.15, st.leftEarSquish + this.leftEarVel * clampedDt));
+    st.leftEarSquish = Math.max(-0.22, Math.min(1.18, st.leftEarSquish + this.leftEarVel * clampedDt));
 
     this.rightEarVel += ((targetRightEar - st.rightEarSquish) * 90 - this.rightEarVel * 11) * clampedDt;
-    st.rightEarSquish = Math.max(-0.08, Math.min(1.15, st.rightEarSquish + this.rightEarVel * clampedDt));
+    st.rightEarSquish = Math.max(-0.22, Math.min(1.18, st.rightEarSquish + this.rightEarVel * clampedDt));
 
     this.headPressVel += ((headInfluence - st.headPress) * 85 - this.headPressVel * 12) * clampedDt;
     st.headPress = Math.max(0, Math.min(1.0, st.headPress + this.headPressVel * clampedDt));
 
-    // 5) Rump "Elevator Butt" lift when stroking lower back / tail root
-    const rumpDist = Math.hypot(localHand.x - 0.16, localHand.y);
-    const targetRump = st.isOverCat ? Math.max(0, 1 - rumpDist / 0.22) * st.handPress : 0;
-    this.rumpLiftVel += ((targetRump - st.rumpLift) * 55 - this.rumpLiftVel * 9.5) * clampedDt;
-    st.rumpLift = Math.max(0, Math.min(1.0, st.rumpLift + this.rumpLiftVel * clampedDt));
+    // 7) Rump "Elevator Butt" lift (boosted by stroking lower back OR rhythmic bongo patting!)
+    const rumpDist = Math.hypot(localHand.x - 0.15, localHand.y);
+    const patLift = this.patComboTimer > 0 ? Math.min(0.95, 0.30 + this.patCombo * 0.11) : 0;
+    const targetRump = Math.max(
+      st.isOverCat ? Math.max(0, 1 - rumpDist / 0.22) * st.handPress : 0,
+      patLift,
+    );
+    this.rumpLiftVel += ((targetRump - st.rumpLift) * 58 - this.rumpLiftVel * 9.0) * clampedDt;
+    st.rumpLift = Math.max(0, Math.min(1.2, st.rumpLift + this.rumpLiftVel * clampedDt));
 
-    // 6) Articulated Tail Physics (content slow sway + interactive curl/deflection)
-    const wagFreq = 1.05 + st.contentment * 0.55;
-    const wagAmp = 0.012 + st.contentment * 0.026 + st.rumpLift * 0.032;
+    // 8) Articulated Tail Physics (content slow sway / hunter twitch / irritated fast lash!)
+    const hunterBoost = st.laserVisible > 0.3 ? 1.0 : 0.0;
+    const wagFreq = 1.05 + st.contentment * 0.55 + st.annoyance * 4.8 + hunterBoost * 3.2;
+    const wagAmp =
+      0.012 + st.contentment * 0.024 + st.rumpLift * 0.030 + st.annoyance * 0.075 + hunterBoost * 0.032;
 
     for (let i = 0; i < this.tailRest.length; i++) {
       const rest = this.tailRest[i];
@@ -330,20 +592,17 @@ export class CatPhysics {
       const vel = this.tailVel[i];
 
       if (i === 0) {
-        // Root stays attached to rump
         pt.x = rest.x;
         pt.y = rest.y - st.rumpLift * 0.012;
         continue;
       }
 
       const frac = i / (this.tailRest.length - 1);
-      // Graceful slow curl & wave along the tail
       const wave = Math.sin(st.time * wagFreq - frac * 1.9) * wagAmp * frac;
       const curlTight = st.rumpLift * 0.035 * frac;
       const goalX = rest.x - curlTight * 0.9 + Math.cos(st.time * 0.7 + frac) * 0.008 * frac;
       const goalY = rest.y + wave - st.rumpLift * 0.028 * frac;
 
-      // Direct hand push on tail segments
       let pushX = 0;
       let pushY = 0;
       if (st.isOverCat && st.handPress > 0.12) {
@@ -357,7 +616,7 @@ export class CatPhysics {
         }
       }
 
-      const k = 32 - frac * 12;
+      const k = 32 - frac * 12 + st.annoyance * 18;
       const damp = 6.2 - frac * 1.2;
       vel.x += ((goalX - pt.x) * k + pushX * 28 - vel.x * damp) * clampedDt;
       vel.y += ((goalY - pt.y) * k + pushY * 28 - vel.y * damp) * clampedDt;
@@ -365,7 +624,6 @@ export class CatPhysics {
       pt.x += vel.x * clampedDt;
       pt.y += vel.y * clampedDt;
 
-      // Preserve segment length so tail never stretches unnaturally
       const prev = st.tailPoints[i - 1];
       const restLen = Math.hypot(
         this.tailRest[i].x - this.tailRest[i - 1].x,
@@ -378,7 +636,44 @@ export class CatPhysics {
       pt.y = prev.y + (segDy / segLen) * restLen;
     }
 
-    // Recompute ultra-smooth 13-point Catmull-Rom spline for rendering (zero polygonal facets!)
     st.tailSpline = this.sampleCatmullRom(st.tailPoints, 13);
+    return events;
+  }
+
+  private spawnFurball(
+    nearPos: Vec2,
+    aspect: number,
+    furLength: number,
+    color: [number, number, number],
+  ): void {
+    const st = this.state;
+    // Pop off gently toward the lower or upper cushion beside the cat
+    const side = Math.random() > 0.35 ? 1 : -1;
+    const x = Math.max(0.14, Math.min(0.86, nearPos.x + (Math.random() - 0.5) * 0.08));
+    const y = Math.max(0.18, Math.min(0.86, 0.545 + side * (0.20 + Math.random() * 0.07)));
+    const radius = 0.017 + furLength * 0.013 + Math.random() * 0.005;
+
+    // If already at max 6 furballs, grow the nearest one slightly instead of cluttering!
+    if (st.furballs.length >= 6) {
+      const oldest = st.furballs.shift()!;
+      oldest.x = x;
+      oldest.y = y;
+      oldest.vx = (Math.random() - 0.5) * 0.14 / Math.max(0.8, aspect);
+      oldest.vy = side * (0.14 + Math.random() * 0.08);
+      oldest.radius = Math.min(0.036, radius * 1.15);
+      oldest.color = [...color];
+      st.furballs.push(oldest);
+      return;
+    }
+
+    st.furballs.push({
+      x,
+      y,
+      vx: (Math.random() - 0.5) * 0.14 / Math.max(0.8, aspect),
+      vy: side * (0.16 + Math.random() * 0.08),
+      radius,
+      color: [...color],
+      seed: Math.random() * 100,
+    });
   }
 }

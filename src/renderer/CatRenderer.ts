@@ -1,5 +1,6 @@
 import type { CatBreed, CoatPatternType } from '../breeds';
-import type { CatPhysicsState } from '../physics/catPhysics';
+import type { AtmosphereMode } from '../paint/coatPainter';
+import type { CatPhysicsState, ToolMode } from '../physics/catPhysics';
 import { FULLSCREEN_VERT, SCENE_FRAG, SIM_FRAG } from './shaders';
 
 const PATTERN_INDEX: Record<CoatPatternType, number> = {
@@ -13,20 +14,20 @@ const PATTERN_INDEX: Record<CoatPatternType, number> = {
   sphynx: 7,
 };
 
+const TOOL_INDEX: Record<ToolMode, number> = {
+  hand: 0,
+  comb: 1,
+  laser: 2,
+  paint: 3,
+};
+
 interface SimFBO {
   fbo: WebGLFramebuffer;
   tex: WebGLTexture;
 }
 
 /**
- * 2.5D WebGL2 Multi-Layer Fur & Tactile Physics Renderer
- *
- * Pipeline per frame:
- * 1. Simulation Pass (Ping-Pong FBO 256×160): updates spring-damper finger indentation
- *    and combed fur flow field.
- * 2. Scene Pass (Full Retina Canvas): composites sunlit/moonlit linen cushion,
- *    dynamic cat cast shadow, 20-layer volumetric 2.5D fur shell march, and
- *    color-matched photorealistic petting hand.
+ * 2.5D WebGL2 Multi-Layer Fur, Soft-Body & Interactive Tool Renderer (v2.0)
  */
 export class CatRenderer {
   private readonly canvas: HTMLCanvasElement;
@@ -42,18 +43,22 @@ export class CatRenderer {
   private simIndex = 0;
 
   private readonly noiseTex: WebGLTexture;
+  private readonly paintTex: WebGLTexture;
   private bgTex: WebGLTexture;
   private handTex: WebGLTexture;
   private hasBgTex = false;
   private hasHandTex = false;
-  private bgSize: [number, number] = [1536, 1024];
-  private handSize: [number, number] = [768, 1024];
+  private hasPaint = false;
+  private bgSize: [number, number] = [1264, 848];
+  private handSize: [number, number] = [600, 804];
 
   private simUniforms: Record<string, WebGLUniformLocation | null> = {};
   private sceneUniforms: Record<string, WebGLUniformLocation | null> = {};
 
   private currentNight = 0;
   private targetNight = 0;
+  private currentRain = 0;
+  private targetRain = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -81,19 +86,29 @@ export class CatRenderer {
     this.clearSimBuffers();
 
     this.noiseTex = this.createSeamlessNoiseTexture(512);
+    this.paintTex = this.createPaintTexture();
     this.bgTex = this.createPlaceholderTexture();
     this.handTex = this.createPlaceholderTexture();
 
     this.cacheUniforms();
   }
 
-  public setNightMode(night: boolean): void {
-    this.targetNight = night ? 1 : 0;
+  public setAtmosphere(mode: AtmosphereMode): void {
+    this.targetNight = mode === 'night' ? 1 : 0;
+    this.targetRain = mode === 'rain' ? 1 : 0;
+  }
+
+  public uploadPaintCanvas(paintCanvas: HTMLCanvasElement, hasPaint: boolean): void {
+    const gl = this.gl;
+    this.hasPaint = hasPaint;
+    gl.bindTexture(gl.TEXTURE_2D, this.paintTex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, paintCanvas);
   }
 
   public async loadAssets(bgUrl: string, handUrl: string): Promise<void> {
     await Promise.all([
-      this.loadImageTexture(bgUrl, false)
+      this.loadImageTexture(bgUrl)
         .then(({ tex, width, height }) => {
           this.gl.deleteTexture(this.bgTex);
           this.bgTex = tex;
@@ -103,7 +118,7 @@ export class CatRenderer {
         .catch(() => {
           this.hasBgTex = false;
         }),
-      this.loadImageTexture(handUrl, true)
+      this.loadImageTexture(handUrl)
         .then(({ tex, width, height }) => {
           this.gl.deleteTexture(this.handTex);
           this.handTex = tex;
@@ -131,21 +146,18 @@ export class CatRenderer {
     return this.canvas.width / Math.max(1, this.canvas.height);
   }
 
-  public resetSimulation(): void {
-    this.clearSimBuffers();
-  }
-
   public render(dt: number, state: CatPhysicsState, breed: CatBreed): void {
     const gl = this.gl;
     const clampedDt = Math.min(dt, 0.05);
     const aspect = this.getAspect();
 
-    // Smooth Daylight <-> Moonlight transition
-    this.currentNight += (this.targetNight - this.currentNight) * Math.min(1, clampedDt * 5.2);
+    this.currentNight += (this.targetNight - this.currentNight) * Math.min(1, clampedDt * 5.0);
+    this.currentRain += (this.targetRain - this.currentRain) * Math.min(1, clampedDt * 5.0);
 
+    const toolIdx = TOOL_INDEX[state.toolMode];
     gl.bindVertexArray(this.emptyVao);
 
-    // ----- Pass 1: Interactive Soft-Body & Fur Combing Simulation -----
+    // ----- Pass 1: Simulation FBO -----
     const readBuf = this.simBuffers[this.simIndex];
     const writeBuf = this.simBuffers[1 - this.simIndex];
 
@@ -165,11 +177,14 @@ export class CatRenderer {
     gl.uniform1f(this.simUniforms.uHandPress, state.handPress);
     gl.uniform1f(this.simUniforms.uHandVisible, state.handVisibility);
     gl.uniform1f(this.simUniforms.uCatSize, state.catSize);
+    gl.uniform1i(this.simUniforms.uToolMode, toolIdx);
+    gl.uniform2f(this.simUniforms.uPatPos, state.patPos.x, state.patPos.y);
+    gl.uniform1f(this.simUniforms.uPatImpulse, state.patImpulse);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     this.simIndex = 1 - this.simIndex;
 
-    // ----- Pass 2: Fullscreen 2.5D Photorealistic Cat + Cushion + Hand -----
+    // ----- Pass 2: Fullscreen 2.5D Scene -----
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.useProgram(this.sceneProgram);
@@ -190,14 +205,20 @@ export class CatRenderer {
     gl.bindTexture(gl.TEXTURE_2D, this.handTex);
     gl.uniform1i(this.sceneUniforms.uHandTex, 3);
 
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, this.paintTex);
+    gl.uniform1i(this.sceneUniforms.uPaintTex, 4);
+
     gl.uniform1f(this.sceneUniforms.uHasBgTex, this.hasBgTex ? 1.0 : 0.0);
     gl.uniform1f(this.sceneUniforms.uHasHandTex, this.hasHandTex ? 1.0 : 0.0);
+    gl.uniform1f(this.sceneUniforms.uHasPaint, this.hasPaint ? 1.0 : 0.0);
     gl.uniform2f(this.sceneUniforms.uBgAspectSize, this.bgSize[0], this.bgSize[1]);
     gl.uniform2f(this.sceneUniforms.uHandTexSize, this.handSize[0], this.handSize[1]);
 
     gl.uniform1f(this.sceneUniforms.uTime, state.time);
     gl.uniform1f(this.sceneUniforms.uAspect, aspect);
     gl.uniform1f(this.sceneUniforms.uNight, this.currentNight);
+    gl.uniform1f(this.sceneUniforms.uRain, this.currentRain);
 
     gl.uniform1f(this.sceneUniforms.uCatSize, state.catSize);
     gl.uniform1f(this.sceneUniforms.uTorsoWidth, state.torsoWidth);
@@ -206,6 +227,9 @@ export class CatRenderer {
     gl.uniform1f(this.sceneUniforms.uRightEarSquish, state.rightEarSquish);
     gl.uniform1f(this.sceneUniforms.uHeadPress, state.headPress);
     gl.uniform1f(this.sceneUniforms.uRumpLift, state.rumpLift);
+    gl.uniform1f(this.sceneUniforms.uHeadYaw, state.headYaw);
+    gl.uniform1f(this.sceneUniforms.uPounceOffset, state.pounceOffset);
+    gl.uniform1f(this.sceneUniforms.uSkinTwitch, state.skinTwitch);
 
     const tailFlat = new Float32Array(26);
     for (let i = 0; i < 13; i++) {
@@ -226,10 +250,30 @@ export class CatRenderer {
     gl.uniform1f(this.sceneUniforms.uTailFluff, breed.tailFluff);
     gl.uniform1f(this.sceneUniforms.uRuffFluff, breed.ruffFluff);
 
+    gl.uniform1i(this.sceneUniforms.uToolMode, toolIdx);
     gl.uniform2f(this.sceneUniforms.uHandPos, state.handPos.x, state.handPos.y);
     gl.uniform1f(this.sceneUniforms.uHandAngle, state.handAngle);
     gl.uniform1f(this.sceneUniforms.uHandPress, state.handPress);
     gl.uniform1f(this.sceneUniforms.uHandVisible, state.handVisibility);
+    gl.uniform2f(this.sceneUniforms.uLaserPos, state.laserPos.x, state.laserPos.y);
+    gl.uniform1f(this.sceneUniforms.uLaserVisible, state.laserVisible);
+
+    const fbCount = Math.min(6, state.furballs.length);
+    gl.uniform1i(this.sceneUniforms.uFurballCount, fbCount);
+    const fbPos = new Float32Array(24);
+    const fbCol = new Float32Array(18);
+    for (let i = 0; i < fbCount; i++) {
+      const fb = state.furballs[i];
+      fbPos[i * 4] = fb.x;
+      fbPos[i * 4 + 1] = fb.y;
+      fbPos[i * 4 + 2] = fb.radius;
+      fbPos[i * 4 + 3] = fb.seed;
+      fbCol[i * 3] = fb.color[0];
+      fbCol[i * 3 + 1] = fb.color[1];
+      fbCol[i * 3 + 2] = fb.color[2];
+    }
+    gl.uniform4fv(this.sceneUniforms.uFurballPos, fbPos);
+    gl.uniform3fv(this.sceneUniforms.uFurballCol, fbCol);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
@@ -239,20 +283,23 @@ export class CatRenderer {
     const simNames = [
       'uPrevSim', 'uTexelSize', 'uDt', 'uAspect',
       'uHandPos', 'uHandVel', 'uHandAngle', 'uHandPress', 'uHandVisible', 'uCatSize',
+      'uToolMode', 'uPatPos', 'uPatImpulse',
     ];
     for (const name of simNames) {
       this.simUniforms[name] = gl.getUniformLocation(this.simProgram, name);
     }
 
     const sceneNames = [
-      'uSimTex', 'uNoiseTex', 'uBgTex', 'uHandTex',
-      'uHasBgTex', 'uHasHandTex', 'uBgAspectSize', 'uHandTexSize',
-      'uTime', 'uAspect', 'uNight',
+      'uSimTex', 'uNoiseTex', 'uBgTex', 'uHandTex', 'uPaintTex',
+      'uHasBgTex', 'uHasHandTex', 'uHasPaint', 'uBgAspectSize', 'uHandTexSize',
+      'uTime', 'uAspect', 'uNight', 'uRain',
       'uCatSize', 'uTorsoWidth', 'uBreath',
-      'uLeftEarSquish', 'uRightEarSquish', 'uHeadPress', 'uRumpLift', 'uTail',
+      'uLeftEarSquish', 'uRightEarSquish', 'uHeadPress', 'uRumpLift',
+      'uHeadYaw', 'uPounceOffset', 'uSkinTwitch', 'uTail',
       'uPatternType', 'uPrimaryColor', 'uSecondaryColor', 'uTertiaryColor', 'uEarInnerColor',
       'uFurLength', 'uFurClump', 'uSheen', 'uPatternSeed', 'uTailFluff', 'uRuffFluff',
-      'uHandPos', 'uHandAngle', 'uHandPress', 'uHandVisible',
+      'uToolMode', 'uHandPos', 'uHandAngle', 'uHandPress', 'uHandVisible',
+      'uLaserPos', 'uLaserVisible', 'uFurballCount', 'uFurballPos', 'uFurballCol',
     ];
     for (const name of sceneNames) {
       this.sceneUniforms[name] = gl.getUniformLocation(this.sceneProgram, name);
@@ -269,8 +316,7 @@ export class CatRenderer {
     gl.attachShader(prog, fs);
     gl.linkProgram(prog);
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-      const log = gl.getProgramInfoLog(prog);
-      throw new Error(`Program link error: ${log}`);
+      throw new Error(`Program link error: ${gl.getProgramInfoLog(prog)}`);
     }
     gl.deleteShader(vs);
     gl.deleteShader(fs);
@@ -284,8 +330,7 @@ export class CatRenderer {
     gl.shaderSource(shader, src);
     gl.compileShader(shader);
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-      const log = gl.getShaderInfoLog(shader);
-      throw new Error(`Shader compile error: ${log}`);
+      throw new Error(`Shader compile error: ${gl.getShaderInfoLog(shader)}`);
     }
     return shader;
   }
@@ -297,10 +342,7 @@ export class CatRenderer {
     if (!tex || !fbo) throw new Error('Failed to allocate simulation FBO');
 
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(
-      gl.TEXTURE_2D, 0, gl.RGBA8, this.simWidth, this.simHeight,
-      0, gl.RGBA, gl.UNSIGNED_BYTE, null,
-    );
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, this.simWidth, this.simHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -309,7 +351,6 @@ export class CatRenderer {
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-
     return { fbo, tex };
   }
 
@@ -317,25 +358,28 @@ export class CatRenderer {
     const gl = this.gl;
     for (const buf of this.simBuffers) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, buf.fbo);
-      // R=0 (no indent), G=0.5 (0 vel), B=0.5 (0 flowX), A=0.5 (0 flowY)
       gl.clearColor(0.0, 0.5, 0.5, 0.5);
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
-  /**
-   * Generates a 512×512 seamlessly tileable multi-frequency RGBA noise texture:
-   *  R: ultra-fine value noise (individual hairs)
-   *  G: slightly shifted fine noise (cross-hair contrast)
-   *  B: medium-frequency soft tuft noise (fur clumps)
-   *  A: low-frequency smooth organic warp noise (coat patches & stripes)
-   */
+  private createPaintTexture(): WebGLTexture {
+    const gl = this.gl;
+    const tex = gl.createTexture();
+    if (!tex) throw new Error('Failed to create paint texture');
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return tex;
+  }
+
   private createSeamlessNoiseTexture(size: number): WebGLTexture {
     const gl = this.gl;
     const data = new Uint8Array(size * size * 4);
-
-    // Deterministic fast PRNG so coat patterns look consistent every session
     let seed = 133791;
     const rand = () => {
       seed = (seed * 1664525 + 1013904223) >>> 0;
@@ -359,14 +403,11 @@ export class CatRenderer {
       const ty = fy - Math.floor(fy);
       const sx = tx * tx * (3 - 2 * tx);
       const sy = ty * ty * (3 - 2 * ty);
-
       const n00 = grid[y0 * period + x0];
       const n10 = grid[y0 * period + x1];
       const n01 = grid[y1 * period + x0];
       const n11 = grid[y1 * period + x1];
-      const nx0 = n00 + (n10 - n00) * sx;
-      const nx1 = n01 + (n11 - n01) * sx;
-      return nx0 + (nx1 - nx0) * sy;
+      return n00 + (n10 - n00) * sx + (n01 + (n11 - n01) * sx - (n00 + (n10 - n00) * sx)) * sy;
     };
 
     const gFine1 = makeTileGrid(256);
@@ -382,7 +423,6 @@ export class CatRenderer {
         const g = sampleTile(gFine1, 256, (u + 0.31) % 1, (v + 0.67) % 1);
         const b = sampleTile(gMid, 48, u, v) * 0.65 + sampleTile(gFine2, 128, u, v) * 0.35;
         const a = sampleTile(gLow, 16, u, v) * 0.72 + sampleTile(gMid, 48, u, v) * 0.28;
-
         const idx = (y * size + x) * 4;
         data[idx] = Math.round(r * 255);
         data[idx + 1] = Math.round(g * 255);
@@ -408,17 +448,11 @@ export class CatRenderer {
     const tex = gl.createTexture();
     if (!tex) throw new Error('Failed to create placeholder texture');
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(
-      gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
-      new Uint8Array([0, 0, 0, 0]),
-    );
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
     return tex;
   }
 
-  private loadImageTexture(
-    url: string,
-    clamp: boolean,
-  ): Promise<{ tex: WebGLTexture; width: number; height: number }> {
+  private loadImageTexture(url: string): Promise<{ tex: WebGLTexture; width: number; height: number }> {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
@@ -435,9 +469,8 @@ export class CatRenderer {
         gl.generateMipmap(gl.TEXTURE_2D);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-        const wrap = clamp ? gl.CLAMP_TO_EDGE : gl.CLAMP_TO_EDGE;
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
         resolve({ tex, width: img.naturalWidth, height: img.naturalHeight });
       };
       img.onerror = () => reject(new Error(`Failed to load image: ${url}`));
@@ -451,6 +484,7 @@ export class CatRenderer {
     gl.deleteProgram(this.sceneProgram);
     gl.deleteVertexArray(this.emptyVao);
     gl.deleteTexture(this.noiseTex);
+    gl.deleteTexture(this.paintTex);
     gl.deleteTexture(this.bgTex);
     gl.deleteTexture(this.handTex);
     for (const buf of this.simBuffers) {
