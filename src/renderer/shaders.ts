@@ -147,11 +147,9 @@ uniform sampler2D uSimTex;
 uniform sampler2D uNoiseTex;
 uniform sampler2D uBgTex;
 uniform sampler2D uHandTex;
-uniform sampler2D uPaintTex;
 
 uniform float uHasBgTex;
 uniform float uHasHandTex;
-uniform float uHasPaint;
 uniform vec2 uBgAspectSize;
 uniform vec2 uHandTexSize;
 
@@ -492,15 +490,6 @@ vec3 evalCoatColor(vec2 p, CatGeom g) {
     float tailShade = g.tailMask * (0.25 + 0.35 * g.tailT);
     col = mix(uPrimaryColor, uTertiaryColor, smoothstep(0.35, 0.75, skinMott) * 0.45);
     col = mix(col, uSecondaryColor, clamp(max(earShade, tailShade), 0.0, 0.75));
-  }
-
-  // Blend custom user-painted markings AT THE HAIR ROOT so painted spots become real 3D feathered fur!
-  if (uHasPaint > 0.5) {
-    vec2 paintUv = vec2((p.x + 0.55) / 1.10, (p.y + 0.36) / 0.72);
-    if (paintUv.x > 0.0 && paintUv.x < 1.0 && paintUv.y > 0.0 && paintUv.y < 1.0) {
-      vec4 painted = texture(uPaintTex, paintUv);
-      col = mix(col, painted.rgb, painted.a * 0.94);
-    }
   }
 
   col = mix(col, uEarInnerColor, g.earInner * 0.82);

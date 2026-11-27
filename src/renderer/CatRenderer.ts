@@ -1,5 +1,5 @@
 import type { CatBreed, CoatPatternType } from '../breeds';
-import type { AtmosphereMode } from '../paint/coatPainter';
+import type { AtmosphereMode } from '../creator/catCreator';
 import type { CatPhysicsState, ToolMode } from '../physics/catPhysics';
 import { FULLSCREEN_VERT, SCENE_FRAG, SIM_FRAG } from './shaders';
 
@@ -18,7 +18,6 @@ const TOOL_INDEX: Record<ToolMode, number> = {
   hand: 0,
   comb: 1,
   laser: 2,
-  paint: 3,
 };
 
 interface SimFBO {
@@ -43,12 +42,10 @@ export class CatRenderer {
   private simIndex = 0;
 
   private readonly noiseTex: WebGLTexture;
-  private readonly paintTex: WebGLTexture;
   private bgTex: WebGLTexture;
   private handTex: WebGLTexture;
   private hasBgTex = false;
   private hasHandTex = false;
-  private hasPaint = false;
   private bgSize: [number, number] = [1264, 848];
   private handSize: [number, number] = [600, 804];
 
@@ -86,7 +83,6 @@ export class CatRenderer {
     this.clearSimBuffers();
 
     this.noiseTex = this.createSeamlessNoiseTexture(512);
-    this.paintTex = this.createPaintTexture();
     this.bgTex = this.createPlaceholderTexture();
     this.handTex = this.createPlaceholderTexture();
 
@@ -96,14 +92,6 @@ export class CatRenderer {
   public setAtmosphere(mode: AtmosphereMode): void {
     this.targetNight = mode === 'night' ? 1 : 0;
     this.targetRain = mode === 'rain' ? 1 : 0;
-  }
-
-  public uploadPaintCanvas(paintCanvas: HTMLCanvasElement, hasPaint: boolean): void {
-    const gl = this.gl;
-    this.hasPaint = hasPaint;
-    gl.bindTexture(gl.TEXTURE_2D, this.paintTex);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, paintCanvas);
   }
 
   public async loadAssets(bgUrl: string, handUrl: string): Promise<void> {
@@ -205,13 +193,8 @@ export class CatRenderer {
     gl.bindTexture(gl.TEXTURE_2D, this.handTex);
     gl.uniform1i(this.sceneUniforms.uHandTex, 3);
 
-    gl.activeTexture(gl.TEXTURE4);
-    gl.bindTexture(gl.TEXTURE_2D, this.paintTex);
-    gl.uniform1i(this.sceneUniforms.uPaintTex, 4);
-
     gl.uniform1f(this.sceneUniforms.uHasBgTex, this.hasBgTex ? 1.0 : 0.0);
     gl.uniform1f(this.sceneUniforms.uHasHandTex, this.hasHandTex ? 1.0 : 0.0);
-    gl.uniform1f(this.sceneUniforms.uHasPaint, this.hasPaint ? 1.0 : 0.0);
     gl.uniform2f(this.sceneUniforms.uBgAspectSize, this.bgSize[0], this.bgSize[1]);
     gl.uniform2f(this.sceneUniforms.uHandTexSize, this.handSize[0], this.handSize[1]);
 
@@ -290,8 +273,8 @@ export class CatRenderer {
     }
 
     const sceneNames = [
-      'uSimTex', 'uNoiseTex', 'uBgTex', 'uHandTex', 'uPaintTex',
-      'uHasBgTex', 'uHasHandTex', 'uHasPaint', 'uBgAspectSize', 'uHandTexSize',
+      'uSimTex', 'uNoiseTex', 'uBgTex', 'uHandTex',
+      'uHasBgTex', 'uHasHandTex', 'uBgAspectSize', 'uHandTexSize',
       'uTime', 'uAspect', 'uNight', 'uRain',
       'uCatSize', 'uTorsoWidth', 'uBreath',
       'uLeftEarSquish', 'uRightEarSquish', 'uHeadPress', 'uRumpLift',
@@ -362,19 +345,6 @@ export class CatRenderer {
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  }
-
-  private createPaintTexture(): WebGLTexture {
-    const gl = this.gl;
-    const tex = gl.createTexture();
-    if (!tex) throw new Error('Failed to create paint texture');
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    return tex;
   }
 
   private createSeamlessNoiseTexture(size: number): WebGLTexture {
@@ -484,7 +454,6 @@ export class CatRenderer {
     gl.deleteProgram(this.sceneProgram);
     gl.deleteVertexArray(this.emptyVao);
     gl.deleteTexture(this.noiseTex);
-    gl.deleteTexture(this.paintTex);
     gl.deleteTexture(this.bgTex);
     gl.deleteTexture(this.handTex);
     for (const buf of this.simBuffers) {

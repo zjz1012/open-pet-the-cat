@@ -6,7 +6,7 @@
     <title>Open Pet the Cat — 开源 WebGL2 真实撸猫模拟器</title>
     <meta
       name="description"
-      content="开源 2.5D WebGL2 实时撸猫模拟器：20层体积毛发、拍猫屁股果冻回弹、木质排梳攒毛球、激光笔追逐、雨天 ASMR、自定义涂鸦捏猫与拍立得分享。"
+      content="开源 2.5D WebGL2 实时撸猫模拟器：20层体积毛发、参数化基因捏猫工坊、拍猫屁股果冻回弹、木质排梳攒毛球、激光笔追逐、雨天 ASMR 与拍立得分享。"
     />
     <link
       rel="icon"
@@ -22,12 +22,12 @@
           class="stage"
           role="application"
           tabindex="0"
-          aria-label="抚摸猫咪舞台：滑动抚摸，轻点屁股拍打，1-4切换道具，Space自动抚摸，T切换天气"
-          aria-keyshortcuts="Space Enter T 1 2 3 4"
+          aria-label="抚摸猫咪舞台：滑动抚摸，轻点屁股拍打，1-3切换道具，C打开捏猫工坊，Space自动抚摸，T切换天气"
+          aria-keyshortcuts="Space Enter T C 1 2 3"
         >
           <canvas id="scene" aria-hidden="true"></canvas>
 
-          <!-- Top-left sleek tool switcher -->
+          <!-- Top-left interactive tool switcher -->
           <div class="stage-bar stage-bar-left" role="toolbar" aria-label="互动道具">
             <button class="tool-pill" type="button" data-tool="hand" aria-pressed="true" title="徒手撸猫 / 轻点拍屁股 (1)">
               <svg class="icon-sm" viewBox="0 0 24 24" aria-hidden="true">
@@ -65,18 +65,24 @@
               <span>激光</span>
             </button>
 
-            <button class="tool-pill" type="button" data-tool="paint" aria-pressed="false" title="涂鸦捏猫 · 定制你家的猫 (4)">
+            <button
+              id="creator-toggle"
+              class="tool-pill"
+              type="button"
+              aria-expanded="false"
+              aria-controls="creator-panel"
+              title="基因参数捏猫工坊 (C)"
+            >
               <svg class="icon-sm" viewBox="0 0 24 24" aria-hidden="true">
                 <path
-                  d="M18.4 4.6a2.1 2.1 0 0 1 3 3L11 18l-4 1 1-4L18.4 4.6Z"
+                  d="M12 3l1.9 4.6L19 9.5l-4.2 3.1 1.4 5L12 14.8 7.8 17.6l1.4-5L5 9.5l5.1-1.9L12 3Z"
                   fill="none"
                   stroke="currentColor"
-                  stroke-width="1.75"
-                  stroke-linecap="round"
+                  stroke-width="1.7"
                   stroke-linejoin="round"
                 />
               </svg>
-              <span>捏猫</span>
+              <span>捏猫工坊</span>
             </button>
 
             <button id="clear-furballs" class="tool-pill tool-pill-subtle" type="button" hidden title="清扫垫子上的浮毛球">
@@ -85,7 +91,7 @@
             </button>
           </div>
 
-          <!-- Top-right atmosphere + Polaroid + Share controls -->
+          <!-- Top-right atmosphere + Polaroid + Share -->
           <div class="stage-bar stage-bar-right">
             <button
               id="snapshot-btn"
@@ -169,19 +175,113 @@
             </button>
           </div>
 
-          <!-- Floating Paint Studio bar (visible only in Paint mode) -->
-          <div id="paint-studio" class="paint-studio" hidden role="toolbar" aria-label="涂鸦花色工具栏">
-            <div id="paint-colors" class="paint-colors"></div>
-            <span class="paint-divider" aria-hidden="true"></span>
-            <button id="paint-eraser" class="paint-action" type="button" aria-pressed="false" title="橡皮擦">
-              橡皮
-            </button>
-            <label class="paint-size-wrap" title="画笔大小">
-              <span>笔刷</span>
-              <input id="paint-size" type="range" min="6" max="32" step="2" value="16" />
-            </label>
-            <button id="paint-clear" class="paint-action" type="button" title="清空所有涂鸦">清空</button>
-          </div>
+          <!-- Data-Driven Parametric Cat Creator Drawer -->
+          <aside id="creator-panel" class="creator-drawer" role="dialog" aria-label="参数化捏猫工坊" hidden>
+            <div class="creator-head">
+              <strong>捏猫工坊</strong>
+              <div class="creator-head-actions">
+                <button id="creator-random" class="chip-btn" type="button" title="随机生成一只小猫">随机领养</button>
+                <button id="creator-close" class="icon-close-btn" type="button" aria-label="关闭捏猫工坊">×</button>
+              </div>
+            </div>
+
+            <div class="creator-body">
+              <!-- Name -->
+              <div class="field-group">
+                <label class="field-label" for="creator-name">猫咪名字</label>
+                <input
+                  id="creator-name"
+                  class="text-input"
+                  type="text"
+                  maxlength="12"
+                  placeholder="比如：麻薯 / 煤球 / 橘座"
+                />
+              </div>
+
+              <!-- Coat Pattern Genetics -->
+              <div class="field-group">
+                <div class="field-label-row">
+                  <span class="field-label">花纹基因</span>
+                  <button id="creator-reseed" class="link-btn" type="button">换花纹分布</button>
+                </div>
+                <div id="creator-patterns" class="pattern-grid"></div>
+              </div>
+
+              <!-- 3-Channel Realistic Coat Colors -->
+              <div class="field-group">
+                <span class="field-label">三层毛色配方</span>
+                <div class="color-triple">
+                  <label class="color-field">
+                    <input id="creator-c1" type="color" value="#ebe6df" />
+                    <span>主毛色</span>
+                  </label>
+                  <label class="color-field">
+                    <input id="creator-c2" type="color" value="#c26e2b" />
+                    <span>花纹色</span>
+                  </label>
+                  <label class="color-field">
+                    <input id="creator-c3" type="color" value="#1c1a1a" />
+                    <span>点缀/腹色</span>
+                  </label>
+                </div>
+                <div id="creator-natural-swatches" class="natural-row" aria-label="快捷真实毛色（点击填主色，Shift点击填花纹色）"></div>
+              </div>
+
+              <!-- Fur & Silhouette Physics Sliders -->
+              <div class="field-group">
+                <div class="mini-slider">
+                  <div class="slider-head">
+                    <label for="creator-fur-len">毛发长度</label>
+                    <output id="creator-fur-len-out">中短毛</output>
+                  </div>
+                  <input id="creator-fur-len" type="range" min="0" max="100" step="2" value="50" />
+                </div>
+
+                <div class="mini-slider">
+                  <div class="slider-head">
+                    <label for="creator-tail-fluff">尾巴蓬松度</label>
+                    <output id="creator-tail-fluff-out">92%</output>
+                  </div>
+                  <input id="creator-tail-fluff" type="range" min="60" max="165" step="5" value="95" />
+                </div>
+
+                <div class="mini-slider">
+                  <div class="slider-head">
+                    <label for="creator-ruff">围脖绒毛</label>
+                    <output id="creator-ruff-out">20%</output>
+                  </div>
+                  <input id="creator-ruff" type="range" min="0" max="100" step="5" value="20" />
+                </div>
+
+                <div class="mini-slider">
+                  <div class="slider-head">
+                    <label for="creator-sheen">毛发光泽</label>
+                    <output id="creator-sheen-out">60%</output>
+                  </div>
+                  <input id="creator-sheen" type="range" min="30" max="100" step="5" value="60" />
+                </div>
+
+                <div class="mini-slider">
+                  <div class="slider-head">
+                    <label for="creator-purr">呼噜声线</label>
+                    <output id="creator-purr-out">26 Hz</output>
+                  </div>
+                  <input id="creator-purr" type="range" min="21" max="29" step="0.5" value="26" />
+                </div>
+              </div>
+
+              <!-- Personality / Temperament -->
+              <div class="field-group">
+                <span class="field-label">猫脾气性格</span>
+                <div id="creator-temperaments" class="temp-row"></div>
+              </div>
+            </div>
+
+            <div class="creator-foot">
+              <button id="creator-share" class="primary-btn" type="button">生成分享链接</button>
+              <button id="creator-photo" class="secondary-btn" type="button">拍立得</button>
+            </div>
+          </aside>
 
           <!-- Ephemeral gentle toast -->
           <div id="stage-toast" class="stage-toast" role="status" aria-live="polite" hidden></div>
@@ -319,7 +419,7 @@
           <span id="breed-caption" class="breed-caption">三花猫 · Calico</span>
           <span class="sep" aria-hidden="true">·</span>
           <span class="hint">
-            轻点拍屁股 · 逆毛会炸毛 · <kbd>1-4</kbd> 换道具 · <kbd>Space</kbd> 自动撸 · <kbd>T</kbd> 晴/雨/夜
+            轻点拍屁股 · 逆毛会炸毛 · <kbd>1-3</kbd> 换道具 · <kbd>C</kbd> 捏猫工坊 · <kbd>Space</kbd> 自动撸 · <kbd>T</kbd> 晴/雨/夜
           </span>
         </footer>
       </section>

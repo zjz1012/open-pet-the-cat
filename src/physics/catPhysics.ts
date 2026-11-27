@@ -1,4 +1,6 @@
-export type ToolMode = 'hand' | 'comb' | 'laser' | 'paint';
+import type { CatTemperament } from '../creator/catCreator';
+
+export type ToolMode = 'hand' | 'comb' | 'laser';
 
 export interface Vec2 {
   x: number;
@@ -91,6 +93,7 @@ export class CatPhysics {
   private pointerDown = false;
   private pointerTarget: Vec2 = { x: 0.52, y: 0.54 };
   private autoPetPhase = 0;
+  private temperament: CatTemperament = 'normal';
 
   // Spring velocities
   private leftEarVel = 0;
@@ -192,8 +195,15 @@ export class CatPhysics {
 
   public setToolMode(mode: ToolMode): void {
     this.state.toolMode = mode;
-    if (mode === 'laser' || mode === 'paint') {
+    if (mode === 'laser') {
       this.state.autoPetting = false;
+    }
+  }
+
+  public setTemperament(temp: CatTemperament): void {
+    this.temperament = temp;
+    if (temp === 'angel') {
+      this.state.annoyance = 0;
     }
   }
 
@@ -223,7 +233,7 @@ export class CatPhysics {
   }
 
   public toggleAutoPet(): boolean {
-    if (this.state.toolMode === 'laser' || this.state.toolMode === 'paint') {
+    if (this.state.toolMode === 'laser') {
       this.state.toolMode = 'hand';
     }
     this.state.autoPetting = !this.state.autoPetting;
@@ -417,20 +427,21 @@ export class CatPhysics {
     const tailYank =
       isActivelyPetting && hit.zone === 'tail' && speedMag > 0.35 && st.handPress > 0.55;
 
-    if (againstGrainStroke || tailYank) {
-      const rageRate = tailYank ? 0.85 : 0.58;
+    if ((againstGrainStroke || tailYank) && this.temperament !== 'angel') {
+      const spicyMul = this.temperament === 'spicy' ? 1.75 : 1.0;
+      const rageRate = (tailYank ? 0.85 : 0.58) * spicyMul;
       st.annoyance = Math.min(1.0, st.annoyance + clampedDt * rageRate);
       // Trigger sudden cat dorsal skin twitch when rubbing against the grain!
-      if (st.annoyance > 0.28 && this.twitchPhase <= 0) {
+      if (st.annoyance > 0.25 && this.twitchPhase <= 0) {
         this.twitchPhase = 1.0;
       }
-      if (st.annoyance >= 0.94 && this.pushbackTimer <= 0) {
+      if (st.annoyance >= 0.92 && this.pushbackTimer <= 0) {
         this.pushbackTimer = 0.55;
         st.annoyance = 0.62;
         events.hissPushback = true;
       }
     } else {
-      const calmRate = isActivelyPetting ? 0.28 : 0.42;
+      const calmRate = this.temperament === 'angel' ? 1.6 : isActivelyPetting ? 0.28 : 0.42;
       st.annoyance = Math.max(0, st.annoyance - clampedDt * calmRate);
     }
 

@@ -2,13 +2,18 @@ import './styles.css';
 import { CAT_BREEDS, type CatBreed } from './breeds';
 import { PurrEngine } from './audio/purrEngine';
 import {
-  CoatPainter,
-  PAINT_PALETTE,
-  decodeShareHash,
-  encodeShareHash,
+  NATURAL_COAT_SWATCHES,
+  PATTERN_OPTIONS,
+  TEMPERAMENT_OPTIONS,
+  breedFromProfile,
+  decodeSharedCatHash,
+  encodeSharedCatHash,
   exportPolaroidSnapshot,
+  generateRandomCatProfile,
+  profileFromBreed,
   type AtmosphereMode,
-} from './paint/coatPainter';
+  type CustomCatProfile,
+} from './creator/catCreator';
 import { CatPhysics, type ToolMode } from './physics/catPhysics';
 import { CatRenderer } from './renderer/CatRenderer';
 
@@ -20,6 +25,13 @@ const ATMOSPHERE_LABEL: Record<AtmosphereMode, string> = {
   rain: '雨天',
   night: '月光',
 };
+
+function furLengthLabel(val: number): string {
+  if (val <= 0.04) return '无毛';
+  if (val < 0.48) return '丝滑短毛';
+  if (val < 0.74) return '蓬松中毛';
+  return '超长绒毛';
+}
 
 function initApp(): void {
   const viewerEl = document.getElementById('viewer') as HTMLElement;
@@ -51,26 +63,45 @@ function initApp(): void {
   const clearFurballsBtn = document.getElementById('clear-furballs') as HTMLButtonElement;
   const furballBadgeEl = document.getElementById('furball-badge') as HTMLElement;
 
-  const paintStudioEl = document.getElementById('paint-studio') as HTMLElement;
-  const paintColorsEl = document.getElementById('paint-colors') as HTMLElement;
-  const paintEraserBtn = document.getElementById('paint-eraser') as HTMLButtonElement;
-  const paintSizeInput = document.getElementById('paint-size') as HTMLInputElement;
-  const paintClearBtn = document.getElementById('paint-clear') as HTMLButtonElement;
+  // Parametric Cat Creator Drawer elements
+  const creatorToggleBtn = document.getElementById('creator-toggle') as HTMLButtonElement;
+  const creatorPanelEl = document.getElementById('creator-panel') as HTMLElement;
+  const creatorCloseBtn = document.getElementById('creator-close') as HTMLButtonElement;
+  const creatorRandomBtn = document.getElementById('creator-random') as HTMLButtonElement;
+  const creatorReseedBtn = document.getElementById('creator-reseed') as HTMLButtonElement;
+  const creatorNameInput = document.getElementById('creator-name') as HTMLInputElement;
+  const creatorPatternsEl = document.getElementById('creator-patterns') as HTMLElement;
+  const creatorC1Input = document.getElementById('creator-c1') as HTMLInputElement;
+  const creatorC2Input = document.getElementById('creator-c2') as HTMLInputElement;
+  const creatorC3Input = document.getElementById('creator-c3') as HTMLInputElement;
+  const creatorNatSwatchesEl = document.getElementById('creator-natural-swatches') as HTMLElement;
+  const creatorFurLenInput = document.getElementById('creator-fur-len') as HTMLInputElement;
+  const creatorFurLenOut = document.getElementById('creator-fur-len-out') as HTMLOutputElement;
+  const creatorTailInput = document.getElementById('creator-tail-fluff') as HTMLInputElement;
+  const creatorTailOut = document.getElementById('creator-tail-fluff-out') as HTMLOutputElement;
+  const creatorRuffInput = document.getElementById('creator-ruff') as HTMLInputElement;
+  const creatorRuffOut = document.getElementById('creator-ruff-out') as HTMLOutputElement;
+  const creatorSheenInput = document.getElementById('creator-sheen') as HTMLInputElement;
+  const creatorSheenOut = document.getElementById('creator-sheen-out') as HTMLOutputElement;
+  const creatorPurrInput = document.getElementById('creator-purr') as HTMLInputElement;
+  const creatorPurrOut = document.getElementById('creator-purr-out') as HTMLOutputElement;
+  const creatorTempsEl = document.getElementById('creator-temperaments') as HTMLElement;
+  const creatorShareBtn = document.getElementById('creator-share') as HTMLButtonElement;
+  const creatorPhotoBtn = document.getElementById('creator-photo') as HTMLButtonElement;
 
   const toastEl = document.getElementById('stage-toast') as HTMLElement;
 
   const physics = new CatPhysics();
   const purr = new PurrEngine();
-  const painter = new CoatPainter();
 
-  let currentBreed: CatBreed = CAT_BREEDS.find((b) => b.id === 'hana') ?? CAT_BREEDS[0];
+  const defaultBreed = CAT_BREEDS.find((b) => b.id === 'hana') ?? CAT_BREEDS[0];
+  let activePresetId: string | null = defaultBreed.id;
+  let profile: CustomCatProfile = profileFromBreed(defaultBreed);
+  let currentBreed: CatBreed = defaultBreed;
   let atmosphere: AtmosphereMode = 'day';
   let currentTool: ToolMode = 'hand';
-  let activePaintColor = 1; // Warm orange default
-  let eraserActive = false;
 
   let renderer: CatRenderer | null = null;
-  const getRenderer = (): CatRenderer | null => renderer;
   let toastTimer: number | null = null;
 
   function showToast(msg: string, ms = 1900): void {
@@ -91,7 +122,6 @@ function initApp(): void {
       renderer?.dispose();
       renderer = new CatRenderer(canvasEl);
       renderer.setAtmosphere(atmosphere);
-      renderer.uploadPaintCanvas(painter.canvas, painter.hasPaint());
       renderer.resize();
       void renderer.loadAssets('./assets/cushion-bg.webp', './assets/petting-hand.webp');
       fallbackEl.hidden = true;
@@ -108,16 +138,86 @@ function initApp(): void {
     bootRenderer();
   });
 
-  // ----- Breed Swatches -----
+  // ----- Breed Swatches & Parametric Profile Sync -----
   const swatchButtons = new Map<string, HTMLButtonElement>();
+  const patternChipBtns = new Map<string, HTMLButtonElement>();
+  const tempChipBtns = new Map<string, HTMLButtonElement>();
 
-  function selectBreed(breed: CatBreed): void {
+  function updateCaption(): void {
+    const tempLabel =
+      TEMPERAMENT_OPTIONS.find((t) => t.value === profile.temperament)?.label ?? '傲娇主子';
+    if (activePresetId) {
+      const preset = CAT_BREEDS.find((b) => b.id === activePresetId);
+      if (preset) {
+        breedCaptionEl.textContent = `${preset.nameZh} · ${preset.nameEn}`;
+        return;
+      }
+    }
+    const patLabel = PATTERN_OPTIONS.find((p) => p.value === profile.pattern)?.label ?? '定制';
+    breedCaptionEl.textContent = `${profile.name.trim() || '我的小猫'} · ${patLabel} · ${tempLabel}`;
+  }
+
+  function syncCreatorForm(): void {
+    creatorNameInput.value = profile.name;
+    creatorC1Input.value = profile.primaryHex;
+    creatorC2Input.value = profile.secondaryHex;
+    creatorC3Input.value = profile.tertiaryHex;
+
+    const isSphynx = profile.pattern === 'sphynx';
+    const effFur = isSphynx ? 0 : profile.furLength;
+    creatorFurLenInput.value = String(Math.round(effFur * 100));
+    creatorFurLenInput.disabled = isSphynx;
+    creatorFurLenOut.textContent = furLengthLabel(effFur);
+
+    creatorTailInput.value = String(Math.round(profile.tailFluff * 100));
+    creatorTailInput.disabled = isSphynx;
+    creatorTailOut.textContent = `${Math.round(profile.tailFluff * 100)}%`;
+
+    creatorRuffInput.value = String(Math.round(profile.ruffFluff * 100));
+    creatorRuffInput.disabled = isSphynx;
+    creatorRuffOut.textContent = `${Math.round(profile.ruffFluff * 100)}%`;
+
+    creatorSheenInput.value = String(Math.round(profile.sheen * 100));
+    creatorSheenOut.textContent = `${Math.round(profile.sheen * 100)}%`;
+
+    creatorPurrInput.value = String(profile.purrHz);
+    creatorPurrOut.textContent = `${profile.purrHz.toFixed(1)} Hz`;
+
+    for (const [val, btn] of patternChipBtns) {
+      btn.setAttribute('aria-pressed', val === profile.pattern ? 'true' : 'false');
+    }
+    for (const [val, btn] of tempChipBtns) {
+      btn.setAttribute('aria-pressed', val === profile.temperament ? 'true' : 'false');
+    }
+  }
+
+  function applyProfileAsCustom(): void {
+    activePresetId = null;
+    currentBreed = breedFromProfile(profile);
+    purr.setBreedPurrHz(currentBreed.purrHz);
+    physics.setTemperament(profile.temperament);
+    for (const [, btn] of swatchButtons) {
+      btn.setAttribute('aria-pressed', 'false');
+    }
+    updateCaption();
+  }
+
+  function selectPresetBreed(breed: CatBreed): void {
+    activePresetId = breed.id;
     currentBreed = breed;
+    profile = profileFromBreed(
+      breed,
+      Number(sizeInput.value),
+      Number(widthInput.value),
+      profile.temperament,
+    );
     purr.setBreedPurrHz(breed.purrHz);
-    breedCaptionEl.textContent = `${breed.nameZh} · ${breed.nameEn}${painter.hasPaint() ? ' (定制涂鸦)' : ''}`;
+    physics.setTemperament(profile.temperament);
     for (const [id, btn] of swatchButtons) {
       btn.setAttribute('aria-pressed', id === breed.id ? 'true' : 'false');
     }
+    syncCreatorForm();
+    updateCaption();
   }
 
   for (const breed of CAT_BREEDS) {
@@ -135,19 +235,157 @@ function initApp(): void {
     btn.appendChild(fill);
 
     btn.addEventListener('click', () => {
-      selectBreed(breed);
+      selectPresetBreed(breed);
     });
 
     swatchButtons.set(breed.id, btn);
     breedListEl.appendChild(btn);
   }
 
-  // ----- Tool Switcher (Hand / Comb / Laser / Paint) -----
+  // ----- Build Creator Form Chips & Swatches -----
+  for (const opt of PATTERN_OPTIONS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pattern-chip';
+    btn.textContent = opt.label;
+    btn.addEventListener('click', () => {
+      profile.pattern = opt.value;
+      if (opt.value === 'sphynx') {
+        profile.furLength = 0;
+      } else if (profile.furLength < 0.15) {
+        profile.furLength = 0.52;
+      }
+      syncCreatorForm();
+      applyProfileAsCustom();
+    });
+    patternChipBtns.set(opt.value, btn);
+    creatorPatternsEl.appendChild(btn);
+  }
+
+  for (const sw of NATURAL_COAT_SWATCHES) {
+    const dot = document.createElement('button');
+    dot.type = 'button';
+    dot.className = 'nat-dot';
+    dot.style.backgroundColor = sw.hex;
+    dot.title = `${sw.name}（点击设为「主毛色」，Shift+点击设为「花纹色」）`;
+    dot.setAttribute('aria-label', sw.name);
+    dot.addEventListener('click', (e) => {
+      if (e.shiftKey) {
+        profile.secondaryHex = sw.hex;
+      } else {
+        profile.primaryHex = sw.hex;
+      }
+      syncCreatorForm();
+      applyProfileAsCustom();
+    });
+    creatorNatSwatchesEl.appendChild(dot);
+  }
+
+  for (const t of TEMPERAMENT_OPTIONS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'temp-chip';
+    btn.textContent = t.label;
+    btn.title = t.desc;
+    btn.addEventListener('click', () => {
+      profile.temperament = t.value;
+      physics.setTemperament(t.value);
+      syncCreatorForm();
+      updateCaption();
+      showToast(`已切换性格：${t.label}（${t.desc}）`);
+    });
+    tempChipBtns.set(t.value, btn);
+    creatorTempsEl.appendChild(btn);
+  }
+
+  // Creator Form Event Listeners (Live 60fps Parametric Generation!)
+  creatorNameInput.addEventListener('input', () => {
+    profile.name = creatorNameInput.value;
+    applyProfileAsCustom();
+  });
+
+  creatorC1Input.addEventListener('input', () => {
+    profile.primaryHex = creatorC1Input.value;
+    applyProfileAsCustom();
+  });
+  creatorC2Input.addEventListener('input', () => {
+    profile.secondaryHex = creatorC2Input.value;
+    applyProfileAsCustom();
+  });
+  creatorC3Input.addEventListener('input', () => {
+    profile.tertiaryHex = creatorC3Input.value;
+    applyProfileAsCustom();
+  });
+
+  creatorReseedBtn.addEventListener('click', () => {
+    profile.patternSeed = Number((1 + Math.random() * 90).toFixed(2));
+    applyProfileAsCustom();
+    showToast('已重新生成花纹分布 ✨', 1200);
+  });
+
+  creatorFurLenInput.addEventListener('input', () => {
+    profile.furLength = Number(creatorFurLenInput.value) / 100;
+    creatorFurLenOut.textContent = furLengthLabel(profile.furLength);
+    applyProfileAsCustom();
+  });
+
+  creatorTailInput.addEventListener('input', () => {
+    profile.tailFluff = Number(creatorTailInput.value) / 100;
+    creatorTailOut.textContent = `${Math.round(profile.tailFluff * 100)}%`;
+    applyProfileAsCustom();
+  });
+
+  creatorRuffInput.addEventListener('input', () => {
+    profile.ruffFluff = Number(creatorRuffInput.value) / 100;
+    creatorRuffOut.textContent = `${Math.round(profile.ruffFluff * 100)}%`;
+    applyProfileAsCustom();
+  });
+
+  creatorSheenInput.addEventListener('input', () => {
+    profile.sheen = Number(creatorSheenInput.value) / 100;
+    creatorSheenOut.textContent = `${Math.round(profile.sheen * 100)}%`;
+    applyProfileAsCustom();
+  });
+
+  creatorPurrInput.addEventListener('input', () => {
+    profile.purrHz = Number(creatorPurrInput.value);
+    creatorPurrOut.textContent = `${profile.purrHz.toFixed(1)} Hz`;
+    applyProfileAsCustom();
+  });
+
+  creatorRandomBtn.addEventListener('click', () => {
+    profile = generateRandomCatProfile();
+    sizeInput.value = String(profile.sizeIdx);
+    widthInput.value = String(profile.widthIdx);
+    syncProportions();
+    syncCreatorForm();
+    applyProfileAsCustom();
+    showToast(`领养了一只新小猫「${profile.name}」🐱`, 1800);
+  });
+
+  function setCreatorOpen(open: boolean): void {
+    creatorPanelEl.hidden = !open;
+    creatorToggleBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) {
+      setPopoverOpen(false);
+      syncCreatorForm();
+    }
+  }
+
+  creatorToggleBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setCreatorOpen(creatorPanelEl.hidden);
+  });
+
+  creatorCloseBtn.addEventListener('click', () => {
+    setCreatorOpen(false);
+  });
+
+  // ----- Tool Switcher (Hand / Comb / Laser) -----
   function selectTool(tool: ToolMode, announce = false): void {
     currentTool = tool;
     physics.setToolMode(tool);
     stageEl.dataset.tool = tool;
-    paintStudioEl.hidden = tool !== 'paint';
     for (const btn of toolButtons) {
       btn.setAttribute('aria-pressed', btn.dataset.tool === tool ? 'true' : 'false');
     }
@@ -156,7 +394,6 @@ function initApp(): void {
         hand: '徒手模式：顺毛轻撸 · 轻点屁股拍打 · 逆毛会炸毛',
         comb: '木质排梳：划过留下梳齿纹路，长毛猫还会掉毛球哦',
         laser: '红点激光笔：移动红点逗猫，凑近猫头会蓄力轻扑！',
-        paint: '捏猫模式：直接在猫背上画斑块，画完点右上角可分享',
       };
       showToast(tip[tool], 2300);
     }
@@ -177,52 +414,12 @@ function initApp(): void {
     showToast('浮毛球已清扫干净 ✨');
   });
 
-  // ----- Paint Studio Controls -----
-  const paintDotBtns: HTMLButtonElement[] = [];
-
-  function syncPaintUi(): void {
-    paintDotBtns.forEach((btn, idx) => {
-      btn.setAttribute('aria-pressed', !eraserActive && idx === activePaintColor ? 'true' : 'false');
-    });
-    paintEraserBtn.setAttribute('aria-pressed', eraserActive ? 'true' : 'false');
-  }
-
-  PAINT_PALETTE.forEach((p, idx) => {
-    const dot = document.createElement('button');
-    dot.type = 'button';
-    dot.className = 'paint-dot';
-    dot.style.backgroundColor = p.hex;
-    dot.title = p.name;
-    dot.setAttribute('aria-label', p.name);
-    dot.addEventListener('click', (e) => {
-      e.stopPropagation();
-      activePaintColor = idx;
-      eraserActive = false;
-      syncPaintUi();
-    });
-    paintDotBtns.push(dot);
-    paintColorsEl.appendChild(dot);
-  });
-
-  paintEraserBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    eraserActive = !eraserActive;
-    syncPaintUi();
-  });
-
-  paintClearBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    painter.clear();
-    renderer?.uploadPaintCanvas(painter.canvas, false);
-    selectBreed(currentBreed);
-    showToast('已清空自定义花色');
-  });
-  syncPaintUi();
-
   // ----- Proportions Popover -----
   function syncProportions(): void {
     const sIdx = Math.max(0, Math.min(SIZE_STEPS.length - 1, Number(sizeInput.value)));
     const wIdx = Math.max(0, Math.min(WIDTH_STEPS.length - 1, Number(widthInput.value)));
+    profile.sizeIdx = sIdx;
+    profile.widthIdx = wIdx;
     const sVal = SIZE_STEPS[sIdx];
     const wVal = WIDTH_STEPS[wIdx];
     sizeOut.textContent = `${Math.round(sVal * 100)}%`;
@@ -258,7 +455,7 @@ function initApp(): void {
     }
   });
 
-  // ----- Atmosphere Cycle (Day -> Rainy Afternoon ASMR -> Moonlight) -----
+  // ----- Atmosphere Cycle (Day -> Rain -> Night) -----
   function setAtmosphere(mode: AtmosphereMode, announce = false): void {
     atmosphere = mode;
     document.documentElement.dataset.theme = mode === 'night' ? 'dark' : mode === 'rain' ? 'rain' : 'light';
@@ -283,33 +480,43 @@ function initApp(): void {
   });
 
   // ----- Polaroid Snapshot & Share URL -----
-  snapshotBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
+  function triggerSnapshot(): void {
     if (!renderer) return;
-    // Render one fresh frame right before capture so WebGL drawing buffer is populated!
     renderer.render(0.016, physics.state, currentBreed);
-    const caption = `${currentBreed.nameZh} · ${currentBreed.nameEn}`;
-    exportPolaroidSnapshot(canvasEl, caption, atmosphere);
-    showToast('拍立得合照已保存 📸');
-  });
+    const title = profile.name.trim() || currentBreed.nameZh;
+    const patLabel = PATTERN_OPTIONS.find((p) => p.value === profile.pattern)?.label ?? currentBreed.nameEn;
+    exportPolaroidSnapshot(canvasEl, title, `${patLabel} · Open Pet the Cat`, atmosphere);
+    showToast(`「${title}」拍立得合照已保存 📸`);
+  }
 
-  shareBtn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    const hash = encodeShareHash({
-      breedId: currentBreed.id,
-      sizeIdx: Number(sizeInput.value),
-      widthIdx: Number(widthInput.value),
+  async function triggerShare(): Promise<void> {
+    const hash = encodeSharedCatHash({
       atmosphere,
-      dots: painter.getDots(),
+      presetBreedId: activePresetId,
+      profile,
     });
     window.history.replaceState(null, '', hash);
     const shareUrl = window.location.href;
     try {
       await navigator.clipboard.writeText(shareUrl);
-      showToast('已复制专属撸猫链接，发给朋友云撸你家的猫 🔗', 2400);
+      showToast(`已复制「${profile.name || '小猫'}」专属链接，发给朋友云撸吧 🔗`, 2400);
     } catch {
-      showToast('专属链接已更新至地址栏，可直接复制分享 🔗', 2400);
+      showToast('专属链接已写入地址栏，可直接复制分享 🔗', 2400);
     }
+  }
+
+  snapshotBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    triggerSnapshot();
+  });
+  creatorPhotoBtn.addEventListener('click', triggerSnapshot);
+
+  shareBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    void triggerShare();
+  });
+  creatorShareBtn.addEventListener('click', () => {
+    void triggerShare();
   });
 
   // ----- Sound Toggle -----
@@ -349,7 +556,7 @@ function initApp(): void {
 
   document.addEventListener('fullscreenchange', syncFullscreenUi);
 
-  // ----- Pointer, Bongo Butt-Pat Tap & Custom Fur Painting -----
+  // ----- Pointer & Bongo Butt-Pat Interaction -----
   let activePointerId: number | null = null;
   let isPressed = false;
   let downTime = 0;
@@ -363,22 +570,8 @@ function initApp(): void {
     };
   }
 
-  function applyPaintAt(u: number, v: number): void {
-    if (!renderer) return;
-    const local = physics.stageToCatLocal(u, v, renderer.getAspect());
-    const hit = physics.hitTestCat(local);
-    if (!hit.inside) return;
-    const radius = Number(paintSizeInput.value) || 16;
-    painter.paintDot(local, radius, eraserActive ? -1 : activePaintColor);
-    if (painter.isDirty()) {
-      renderer.uploadPaintCanvas(painter.canvas, painter.hasPaint());
-      painter.markClean();
-      selectBreed(currentBreed);
-    }
-  }
-
   stageEl.addEventListener('pointerdown', (e) => {
-    if ((e.target as HTMLElement).closest('button, input, .paint-studio, .stage-bar')) return;
+    if ((e.target as HTMLElement).closest('button, input, .creator-drawer, .stage-bar')) return;
     setPopoverOpen(false);
     purr.unlock();
     activePointerId = e.pointerId;
@@ -386,26 +579,18 @@ function initApp(): void {
     downTime = performance.now();
     downUv = stageUvFromEvent(e);
     stageEl.setPointerCapture?.(e.pointerId);
-
-    if (currentTool === 'paint') {
-      applyPaintAt(downUv.u, downUv.v);
-      return;
-    }
-
     physics.setPointer(downUv.u, downUv.v, true, true);
     stageEl.dataset.pressed = 'true';
   });
 
   stageEl.addEventListener('pointermove', (e) => {
+    if ((e.target as HTMLElement).closest('.creator-drawer')) {
+      if (!isPressed) physics.setPointerLeave();
+      return;
+    }
     if (activePointerId !== null && e.pointerId !== activePointerId) return;
     const { u, v } = stageUvFromEvent(e);
     const touchingOrDown = isPressed || (e.buttons & 1) === 1;
-
-    if (currentTool === 'paint') {
-      if (touchingOrDown) applyPaintAt(u, v);
-      return;
-    }
-
     physics.setPointer(u, v, true, touchingOrDown);
   });
 
@@ -415,7 +600,6 @@ function initApp(): void {
     const elapsed = performance.now() - downTime;
     const moved = Math.hypot(upUv.u - downUv.u, upUv.v - downUv.v);
 
-    // Quick tap on cat's rump/back triggers Bongo Butt-Pat jelly bounce!
     if (currentTool === 'hand' && elapsed < 240 && moved < 0.035 && renderer) {
       const combo = physics.triggerTap(upUv.u, upUv.v, renderer.getAspect());
       if (combo > 0) {
@@ -433,7 +617,7 @@ function initApp(): void {
     stageEl.dataset.pressed = 'false';
     if (e.pointerType === 'touch') {
       physics.setPointerLeave();
-    } else if (currentTool !== 'paint') {
+    } else {
       physics.setPointer(upUv.u, upUv.v, true, false);
     }
   }
@@ -464,36 +648,47 @@ function initApp(): void {
       e.preventDefault();
       const nextIdx = (ATMOSPHERE_CYCLE.indexOf(atmosphere) + 1) % ATMOSPHERE_CYCLE.length;
       setAtmosphere(ATMOSPHERE_CYCLE[nextIdx], true);
+    } else if (e.key === 'c' || e.key === 'C') {
+      e.preventDefault();
+      setCreatorOpen(creatorPanelEl.hidden);
     } else if (e.key === '1') {
       selectTool('hand', true);
     } else if (e.key === '2') {
       selectTool('comb', true);
     } else if (e.key === '3') {
       selectTool('laser', true);
-    } else if (e.key === '4') {
-      selectTool('paint', true);
-    } else if (e.key === 'Escape' && !propPanelEl.hidden) {
-      setPopoverOpen(false);
+    } else if (e.key === 'Escape') {
+      if (!propPanelEl.hidden) setPopoverOpen(false);
+      if (!creatorPanelEl.hidden) setCreatorOpen(false);
     }
   });
 
-  // ----- Restore Shared Custom Cat from URL Hash (#cat=...) -----
-  const shared = decodeShareHash(window.location.hash);
+  // ----- Restore Shared Cat from URL Hash (#cat=...) -----
+  const shared = decodeSharedCatHash(window.location.hash);
   if (shared) {
-    const matched = CAT_BREEDS.find((b) => b.id === shared.breedId);
-    if (matched) currentBreed = matched;
-    sizeInput.value = String(Math.max(0, Math.min(10, shared.sizeIdx)));
-    widthInput.value = String(Math.max(0, Math.min(10, shared.widthIdx)));
+    profile = shared.profile;
+    sizeInput.value = String(profile.sizeIdx);
+    widthInput.value = String(profile.widthIdx);
     setAtmosphere(shared.atmosphere, false);
-    if (shared.dots.length > 0) {
-      painter.loadDots(shared.dots);
-      getRenderer()?.uploadPaintCanvas(painter.canvas, painter.hasPaint());
+    if (shared.presetBreedId) {
+      const matched = CAT_BREEDS.find((b) => b.id === shared.presetBreedId);
+      if (matched) {
+        activePresetId = matched.id;
+        currentBreed = matched;
+      } else {
+        applyProfileAsCustom();
+      }
+    } else {
+      applyProfileAsCustom();
     }
-    showToast('已载入分享的专属小猫 🐱', 2200);
+    showToast(`已载入分享小猫「${profile.name}」🐱`, 2200);
+  } else {
+    selectPresetBreed(defaultBreed);
   }
 
   syncProportions();
-  selectBreed(currentBreed);
+  syncCreatorForm();
+  updateCaption();
   selectTool('hand', false);
 
   const ro = new ResizeObserver(() => {
