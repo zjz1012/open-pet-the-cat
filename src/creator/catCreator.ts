@@ -158,7 +158,8 @@ export function generateRandomCatProfile(): CustomCatProfile {
   return p;
 }
 
-export function encodeSharedCatHash(state: SharedCatState): string {
+/** Encodes shared cat state as raw URL-safe base64 token (used for both ?cat=... and #cat=...) */
+export function encodeSharedCatToken(state: SharedCatState): string {
   const p = state.profile;
   const payload = {
     a: state.atmosphere,
@@ -181,17 +182,31 @@ export function encodeSharedCatHash(state: SharedCatState): string {
     wi: p.widthIdx,
   };
   const json = JSON.stringify(payload);
-  const b64 = btoa(unescape(encodeURIComponent(json)))
+  return btoa(unescape(encodeURIComponent(json)))
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/, '');
-  return `#cat=${b64}`;
 }
 
-export function decodeSharedCatHash(hash: string): SharedCatState | null {
-  if (!hash.startsWith('#cat=')) return null;
+export function encodeSharedCatHash(state: SharedCatState): string {
+  return `#cat=${encodeSharedCatToken(state)}`;
+}
+
+/** Decodes shared cat state from either query (?cat=...), hash (#cat=...), or raw base64 token */
+export function decodeSharedCatState(input: string): SharedCatState | null {
+  let token = '';
+  if (input.startsWith('#cat=')) {
+    token = input.slice(5);
+  } else if (input.includes('cat=')) {
+    const params = new URLSearchParams(input.replace(/^[?#]/, ''));
+    token = params.get('cat') || '';
+  } else if (input.length > 12) {
+    token = input;
+  }
+  if (!token) return null;
+
   try {
-    const raw = hash.slice(5).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = token.replace(/-/g, '+').replace(/_/g, '/');
     const padded = raw + '==='.slice((raw.length + 3) % 4);
     const json = decodeURIComponent(escape(atob(padded)));
     const d = JSON.parse(json) as Record<string, unknown>;
@@ -202,12 +217,12 @@ export function decodeSharedCatHash(hash: string): SharedCatState | null {
     const base = profileFromBreed(fallbackBreed);
 
     const validPatterns = new Set(PATTERN_OPTIONS.map((o) => o.value));
-    const pat = typeof d.pt === 'string' && validPatterns.has(d.pt as CoatPatternType)
-      ? (d.pt as CoatPatternType)
-      : base.pattern;
+    const pat =
+      typeof d.pt === 'string' && validPatterns.has(d.pt as CoatPatternType)
+        ? (d.pt as CoatPatternType)
+        : base.pattern;
 
-    const temp: CatTemperament =
-      d.tp === 'angel' || d.tp === 'spicy' ? d.tp : 'normal';
+    const temp: CatTemperament = d.tp === 'angel' || d.tp === 'spicy' ? d.tp : 'normal';
 
     const profile: CustomCatProfile = {
       name: typeof d.n === 'string' && d.n.trim() ? d.n.trim().slice(0, 16) : base.name,
@@ -228,8 +243,7 @@ export function decodeSharedCatHash(hash: string): SharedCatState | null {
       widthIdx: typeof d.wi === 'number' ? Math.max(0, Math.min(10, Math.round(d.wi))) : 5,
     };
 
-    const atmosphere: AtmosphereMode =
-      d.a === 'rain' || d.a === 'night' ? d.a : 'day';
+    const atmosphere: AtmosphereMode = d.a === 'rain' || d.a === 'night' ? d.a : 'day';
 
     return {
       atmosphere,
@@ -241,23 +255,27 @@ export function decodeSharedCatHash(hash: string): SharedCatState | null {
   }
 }
 
-export function exportPolaroidSnapshot(
+/**
+ * Generates a Polaroid cardstock image as a crisp JPEG data URL (~180–350 KB,
+ * well below Bilibili Toy SDK's 2MB base64 recommendation for saveImageToAlbum & sharePicture).
+ */
+export function renderPolaroidDataUrl(
   sourceCanvas: HTMLCanvasElement,
   catName: string,
   subtitle: string,
   atmosphere: AtmosphereMode,
-): void {
-  const padX = 48;
-  const padTop = 48;
-  const padBottom = 136;
-  const photoW = 1080;
+): string | null {
+  const padX = 42;
+  const padTop = 42;
+  const padBottom = 122;
+  const photoW = 960;
   const photoH = Math.round((photoW * sourceCanvas.height) / Math.max(1, sourceCanvas.width));
 
   const out = document.createElement('canvas');
   out.width = photoW + padX * 2;
   out.height = photoH + padTop + padBottom;
   const ctx = out.getContext('2d');
-  if (!ctx) return;
+  if (!ctx) return null;
 
   ctx.fillStyle = atmosphere === 'night' ? '#1c2432' : '#fcf8f1';
   ctx.fillRect(0, 0, out.width, out.height);
@@ -284,19 +302,23 @@ export function exportPolaroidSnapshot(
   const modeLabel = atmosphere === 'rain' ? '雨天午后' : atmosphere === 'night' ? '月光时刻' : '晴日暖阳';
 
   ctx.fillStyle = atmosphere === 'night' ? '#dce8fa' : '#3d332a';
-  ctx.font = '600 32px "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif';
-  ctx.fillText(catName, padX + 6, padTop + photoH + 64);
+  ctx.font = '600 30px "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif';
+  ctx.fillText(catName, padX + 6, padTop + photoH + 56);
 
   ctx.fillStyle = atmosphere === 'night' ? '#8b9bb2' : '#8d7d6c';
-  ctx.font = '400 22px "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif';
-  ctx.fillText(`${subtitle} · ${modeLabel}`, padX + 6, padTop + photoH + 102);
+  ctx.font = '400 20px "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif';
+  ctx.fillText(`${subtitle} · ${modeLabel}`, padX + 6, padTop + photoH + 92);
 
   ctx.textAlign = 'right';
-  ctx.font = '500 22px ui-monospace, SFMono-Regular, Menlo, monospace';
-  ctx.fillText(dateStr, out.width - padX - 6, padTop + photoH + 98);
+  ctx.font = '500 20px ui-monospace, SFMono-Regular, Menlo, monospace';
+  ctx.fillText(dateStr, out.width - padX - 6, padTop + photoH + 88);
 
+  return out.toDataURL('image/jpeg', 0.90);
+}
+
+export function downloadDataUrl(dataUrl: string, filename: string): void {
   const link = document.createElement('a');
-  link.download = `pet-the-cat-${Date.now()}.png`;
-  link.href = out.toDataURL('image/png');
+  link.download = filename;
+  link.href = dataUrl;
   link.click();
 }

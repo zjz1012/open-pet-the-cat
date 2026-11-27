@@ -15,6 +15,17 @@
   --fab-active: #3c3026;
   --fab-active-text: #fbf5ec;
   --fab-text: #44372c;
+  /* Dynamically updated from Bilibili Toy SDK getContainerState / onContainerChange */
+  --safe-top: 0px;
+  --safe-right: 0px;
+  --safe-bottom: 0px;
+  --safe-left: 0px;
+  --bili-top-clearance: 0px;
+}
+
+html[data-bili-app='true'] {
+  /* Extra clearance in Bilibili App so top-right platform capsule never overlaps buttons */
+  --bili-top-clearance: 42px;
 }
 
 html[data-theme='rain'] {
@@ -73,6 +84,7 @@ body {
     'Microsoft YaHei', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   transition: background-color 0.45s ease, color 0.35s ease;
+  overscroll-behavior: none;
 }
 
 .app {
@@ -80,7 +92,11 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: clamp(12px, 2.4vw, 28px);
+  padding:
+    calc(var(--safe-top) + var(--bili-top-clearance) + clamp(10px, 2vw, 24px))
+    calc(var(--safe-right) + clamp(10px, 2vw, 24px))
+    calc(var(--safe-bottom) + clamp(10px, 2vw, 24px))
+    calc(var(--safe-left) + clamp(10px, 2vw, 24px));
 }
 
 .viewer {
@@ -98,7 +114,11 @@ body {
   width: 100vw;
   height: 100dvh;
   max-width: none;
-  padding: 16px;
+  padding:
+    calc(var(--safe-top) + 12px)
+    calc(var(--safe-right) + 12px)
+    calc(var(--safe-bottom) + 12px)
+    calc(var(--safe-left) + 12px);
   justify-content: center;
   background-color: var(--bg);
 }
@@ -164,6 +184,7 @@ body {
 }
 
 .tool-pill {
+  position: relative;
   height: 34px;
   padding: 0 11px;
   border-radius: 999px;
@@ -179,7 +200,7 @@ body {
   font-weight: 500;
   cursor: pointer;
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.10);
-  transition: transform 0.16s ease, background-color 0.2s ease, color 0.2s ease;
+  transition: transform 0.16s ease, background-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
 }
 
 .tool-pill:hover {
@@ -201,6 +222,22 @@ body {
 
 .tool-pill[hidden] {
   display: none;
+}
+
+/* Follow-Lock badge on locked tools and rare breeds */
+.lock-dot {
+  display: none;
+  width: 13px;
+  height: 13px;
+  margin-left: 1px;
+  opacity: 0.78;
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7 10V7a5 5 0 0 1 10 0v3h1a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h1Zm2 0h6V7a3 3 0 0 0-6 0v3Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7 10V7a5 5 0 0 1 10 0v3h1a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h1Zm2 0h6V7a3 3 0 0 0-6 0v3Z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+[data-locked='true'] > .lock-dot {
+  display: inline-block;
 }
 
 .badge {
@@ -567,6 +604,10 @@ html[data-theme='dark'] #theme-toggle .icon-moon {
   pointer-events: none;
   z-index: 15;
   opacity: 0;
+  white-space: nowrap;
+  max-width: calc(100% - 28px);
+  overflow: hidden;
+  text-overflow: ellipsis;
   transition: opacity 0.25s ease, transform 0.25s ease;
 }
 
@@ -600,7 +641,7 @@ html[data-theme='dark'] #theme-toggle .icon-moon {
   padding: 2px;
   background: transparent;
   cursor: pointer;
-  transition: transform 0.18s ease, border-color 0.2s ease;
+  transition: transform 0.18s ease, border-color 0.2s ease, opacity 0.2s ease;
   flex: 0 0 auto;
 }
 
@@ -626,7 +667,27 @@ html[data-theme='dark'] #theme-toggle .icon-moon {
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.22), 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
-.breed-swatch[aria-pressed='true']::after {
+.breed-swatch[data-locked='true'] .breed-swatch-fill {
+  filter: saturate(0.72) brightness(0.88);
+}
+
+.breed-swatch[data-locked='true']::after {
+  content: '';
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background-color: var(--accent);
+  border: 2px solid var(--bg);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23ffffff' d='M7 10V7a5 5 0 0 1 10 0v3h1a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h1Zm2 0h6V7a3 3 0 0 0-6 0v3Z'/%3E%3C/svg%3E");
+  background-size: 9px 9px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.breed-swatch[aria-pressed='true']:not([data-locked='true'])::after {
   content: '';
   position: absolute;
   right: -1px;
@@ -642,7 +703,7 @@ html[data-theme='dark'] #theme-toggle .icon-moon {
   background-repeat: no-repeat;
 }
 
-html[data-theme='dark'] .breed-swatch[aria-pressed='true']::after {
+html[data-theme='dark'] .breed-swatch[aria-pressed='true']:not([data-locked='true'])::after {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2 4.9 8.6 9.5 3.6' fill='none' stroke='%23101722' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
@@ -846,8 +907,147 @@ html[data-theme='dark'] .breed-swatch[aria-pressed='true']::after {
   cursor: pointer;
 }
 
-@media (max-width: 780px) {
-  .tool-pill span {
+/* ---------- Follow-Author Unlock Modal ---------- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 18, 24, 0.56);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 60;
+}
+
+.modal-backdrop[hidden] {
+  display: none;
+}
+
+.modal-card {
+  position: relative;
+  width: min(390px, 100%);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  padding: 22px 22px 18px;
+  border-radius: 20px;
+  background: var(--surface-glass);
+  border: 1px solid var(--border);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.32);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.modal-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: none;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.modal-close:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.modal-author {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-right: 26px;
+}
+
+.author-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  object-fit: cover;
+  border: 2px solid var(--border);
+  flex-shrink: 0;
+}
+
+.author-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  font-size: 24px;
+}
+
+.modal-title {
+  margin: 0;
+  font-size: 16.5px;
+  font-weight: 700;
+}
+
+.modal-sub {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.perk-list {
+  margin: 0;
+  padding: 12px 14px 12px 28px;
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: 12.5px;
+  line-height: 1.65;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.modal-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--accent);
+  min-height: 16px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.modal-btn {
+  height: 38px;
+  font-size: 13px;
+}
+
+.demo-unlock-btn {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.demo-unlock-btn:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.demo-unlock-btn[hidden] {
+  display: none;
+}
+
+/* ---------- Mobile Portrait Layout ---------- */
+@media (max-width: 780px) and (orientation: portrait) {
+  .tool-pill span:not(.badge) {
     display: none;
   }
 
@@ -866,17 +1066,17 @@ html[data-theme='dark'] .breed-swatch[aria-pressed='true']::after {
   .dock {
     flex-direction: column;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
   }
 
   .breed-list {
     justify-content: center;
-    gap: 9px;
+    gap: 8px;
   }
 
   .breed-swatch {
-    width: 36px;
-    height: 36px;
+    width: 34px;
+    height: 34px;
   }
 
   .popover {
@@ -888,4 +1088,145 @@ html[data-theme='dark'] .breed-swatch[aria-pressed='true']::after {
   .hint {
     display: none;
   }
+}
+
+/* ---------- Mobile Landscape & Bilibili App Immersive Landscape Layout ---------- */
+@media (max-height: 540px) and (orientation: landscape) {
+  .app {
+    height: 100dvh;
+    min-height: 100dvh;
+    overflow: hidden;
+    padding:
+      calc(var(--safe-top) + 6px)
+      calc(var(--safe-right) + 10px)
+      calc(var(--safe-bottom) + 6px)
+      calc(var(--safe-left) + 10px);
+  }
+
+  .viewer {
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    gap: 6px;
+  }
+
+  .stage {
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    height: 100%;
+    aspect-ratio: auto;
+    border-radius: 14px;
+  }
+
+  .stage-bar {
+    top: 8px;
+  }
+
+  .stage-bar-left {
+    left: 8px;
+    max-width: calc(100% - 170px);
+  }
+
+  .stage-bar-right {
+    right: 8px;
+  }
+
+  html[data-bili-app='true'] .stage-bar-right {
+    /* Clear Bilibili App top-right landscape capsule cleanly */
+    top: 44px;
+  }
+
+  .tool-pill {
+    height: 30px;
+    padding: 0 9px;
+    font-size: 11.5px;
+  }
+
+  .stage-fab {
+    height: 30px;
+    min-width: 30px;
+    padding: 0 7px;
+  }
+
+  .fab-label {
+    font-size: 11.5px;
+  }
+
+  .creator-drawer {
+    top: 44px;
+    right: 8px;
+    bottom: 8px;
+    width: min(264px, 44vw);
+  }
+
+  .dock {
+    flex: 0 0 auto;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0;
+  }
+
+  .breed-list {
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    gap: 6px;
+    padding: 2px 2px;
+  }
+
+  .breed-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .breed-swatch {
+    width: 32px;
+    height: 32px;
+  }
+
+  .controls {
+    gap: 6px;
+  }
+
+  .ctrl-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  .footer {
+    display: none;
+  }
+}
+
+/* Explicit landscape class when toggled via SDK/button on wider screens */
+html[data-landscape='true'] .app {
+  height: 100dvh;
+  overflow: hidden;
+  padding:
+    calc(var(--safe-top) + 6px)
+    calc(var(--safe-right) + 10px)
+    calc(var(--safe-bottom) + 6px)
+    calc(var(--safe-left) + 10px);
+}
+
+html[data-landscape='true'] .viewer {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  gap: 6px;
+}
+
+html[data-landscape='true'] .stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: 14px;
+}
+
+html[data-landscape='true'] .footer {
+  display: none;
 }

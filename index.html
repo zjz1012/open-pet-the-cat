@@ -2,17 +2,19 @@
 <html lang="zh-CN" data-theme="light">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Open Pet the Cat — 开源 WebGL2 真实撸猫模拟器</title>
     <meta
       name="description"
-      content="开源 2.5D WebGL2 实时撸猫模拟器：20层体积毛发、参数化基因捏猫工坊、拍猫屁股果冻回弹、木质排梳攒毛球、激光笔追逐、雨天 ASMR 与拍立得分享。"
+      content="开源 2.5D WebGL2 实时撸猫模拟器：20层体积毛发、参数化基因捏猫工坊、拍猫屁股果冻回弹、木质排梳攒毛球、360°激光追逐、雨天 ASMR 与 B站 Toy SDK 适配。"
     />
     <link
       rel="icon"
       type="image/svg+xml"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='%232e2620' d='M16 14l10 12c4-2 8-2 12 0l10-12c2 8 3 16 1 24-2 10-9 16-17 16s-15-6-17-16c-2-8-1-16 1-24z'/%3E%3C/svg%3E"
     />
+    <!-- Bilibili Toy JS SDK -->
+    <script src="//s1.hdslb.com/bfs/seed/toy/app/sdk/toy-sdk.js"></script>
   </head>
   <body>
     <main id="app" class="app">
@@ -43,7 +45,14 @@
               <span>撸猫</span>
             </button>
 
-            <button class="tool-pill" type="button" data-tool="comb" aria-pressed="false" title="木质排梳 · 留梳痕攒毛球 (2)">
+            <button
+              class="tool-pill"
+              type="button"
+              data-tool="comb"
+              data-lock-feature="comb"
+              aria-pressed="false"
+              title="木质排梳 · 关注 UP 主解锁 (2)"
+            >
               <svg class="icon-sm" viewBox="0 0 24 24" aria-hidden="true">
                 <path
                   d="M4 15.5h16a2 2 0 0 0 0-4H4a2 2 0 0 0 0 4ZM6.5 11.5V6M9.5 11.5V6M12.5 11.5V6M15.5 11.5V6M18 11.5V6"
@@ -55,23 +64,33 @@
                 />
               </svg>
               <span>排梳</span>
+              <span class="lock-dot" aria-hidden="true"></span>
             </button>
 
-            <button class="tool-pill" type="button" data-tool="laser" aria-pressed="false" title="红点激光笔 · 猫头追踪扑咬 (3)">
+            <button
+              class="tool-pill"
+              type="button"
+              data-tool="laser"
+              data-lock-feature="laser"
+              aria-pressed="false"
+              title="红点激光笔 · 关注 UP 主解锁 (3)"
+            >
               <svg class="icon-sm" viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="12" cy="12" r="3" fill="currentColor" />
                 <circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2.5 3" />
               </svg>
               <span>激光</span>
+              <span class="lock-dot" aria-hidden="true"></span>
             </button>
 
             <button
               id="creator-toggle"
               class="tool-pill"
               type="button"
+              data-lock-feature="creator"
               aria-expanded="false"
               aria-controls="creator-panel"
-              title="基因参数捏猫工坊 (C)"
+              title="基因参数捏猫工坊 · 关注 UP 主解锁 (C)"
             >
               <svg class="icon-sm" viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -83,6 +102,7 @@
                 />
               </svg>
               <span>捏猫工坊</span>
+              <span class="lock-dot" aria-hidden="true"></span>
             </button>
 
             <button id="clear-furballs" class="tool-pill tool-pill-subtle" type="button" hidden title="清扫垫子上的浮毛球">
@@ -91,14 +111,14 @@
             </button>
           </div>
 
-          <!-- Top-right atmosphere + Polaroid + Share -->
+          <!-- Top-right atmosphere + Polaroid + Share (leaves safe clearance for Bilibili App capsule) -->
           <div class="stage-bar stage-bar-right">
             <button
               id="snapshot-btn"
               class="stage-fab"
               type="button"
               aria-label="拍立得留念"
-              title="拍立得留念（导出合照）"
+              title="拍立得留念（保存到相册/本地）"
             >
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -116,8 +136,8 @@
               id="share-btn"
               class="stage-fab"
               type="button"
-              aria-label="复制专属分享链接"
-              title="复制专属撸猫链接"
+              aria-label="分享小猫"
+              title="分享专属撸猫链接"
             >
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -186,7 +206,6 @@
             </div>
 
             <div class="creator-body">
-              <!-- Name -->
               <div class="field-group">
                 <label class="field-label" for="creator-name">猫咪名字</label>
                 <input
@@ -198,7 +217,6 @@
                 />
               </div>
 
-              <!-- Coat Pattern Genetics -->
               <div class="field-group">
                 <div class="field-label-row">
                   <span class="field-label">花纹基因</span>
@@ -207,7 +225,6 @@
                 <div id="creator-patterns" class="pattern-grid"></div>
               </div>
 
-              <!-- 3-Channel Realistic Coat Colors -->
               <div class="field-group">
                 <span class="field-label">三层毛色配方</span>
                 <div class="color-triple">
@@ -224,10 +241,9 @@
                     <span>点缀/腹色</span>
                   </label>
                 </div>
-                <div id="creator-natural-swatches" class="natural-row" aria-label="快捷真实毛色（点击填主色，Shift点击填花纹色）"></div>
+                <div id="creator-natural-swatches" class="natural-row"></div>
               </div>
 
-              <!-- Fur & Silhouette Physics Sliders -->
               <div class="field-group">
                 <div class="mini-slider">
                   <div class="slider-head">
@@ -270,7 +286,6 @@
                 </div>
               </div>
 
-              <!-- Personality / Temperament -->
               <div class="field-group">
                 <span class="field-label">猫脾气性格</span>
                 <div id="creator-temperaments" class="temp-row"></div>
@@ -384,6 +399,20 @@
             </button>
 
             <button
+              id="landscape-toggle"
+              class="ctrl-btn"
+              type="button"
+              aria-pressed="false"
+              aria-label="切换横屏沉浸模式"
+              title="横屏沉浸模式（B站 App 支持自动旋转）"
+            >
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="6.5" width="18" height="11" rx="2.2" fill="none" stroke="currentColor" stroke-width="1.75" />
+                <path d="M17.5 10.5v3" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" />
+              </svg>
+            </button>
+
+            <button
               id="expand-toggle"
               class="ctrl-btn"
               type="button"
@@ -424,6 +453,40 @@
         </footer>
       </section>
     </main>
+
+    <!-- Follow-Author Unlock Modal (Bilibili Toy SDK getAuthorRelation) -->
+    <div id="follow-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="follow-modal-title" hidden>
+      <div class="modal-card">
+        <button id="follow-close-btn" class="modal-close" type="button" aria-label="关闭弹窗">×</button>
+
+        <div class="modal-author">
+          <img id="follow-author-avatar" class="author-avatar" alt="UP主头像" hidden />
+          <div id="follow-author-placeholder" class="author-avatar author-placeholder" aria-hidden="true">🐱</div>
+          <div>
+            <h2 id="follow-modal-title" class="modal-title">关注 UP 主免费解锁</h2>
+            <p id="follow-modal-sub" class="modal-sub">关注作者即可解锁全部稀有猫种与特色玩法</p>
+          </div>
+        </div>
+
+        <ul class="perk-list">
+          <li><strong>4 只稀有猫种</strong>：布偶猫、西伯利亚猫、挪威森林猫、斯芬克斯猫</li>
+          <li><strong>木质排梳 &amp; 红点激光笔</strong>：顺毛留梳痕掉毛球、360° 转圈追红点</li>
+          <li><strong>基因捏猫工坊 &amp; 雨天 ASMR</strong>：定制专属小猫与窗外细雨白噪音</li>
+        </ul>
+
+        <p id="follow-status-hint" class="modal-hint"></p>
+
+        <div class="modal-actions">
+          <button id="follow-go-btn" class="primary-btn modal-btn" type="button">去关注 UP 主</button>
+          <button id="follow-verify-btn" class="secondary-btn modal-btn" type="button">我已关注，刷新解锁</button>
+        </div>
+
+        <!-- Shown ONLY in standalone non-Bilibili local/demo preview; strictly hidden in Bilibili Toy runtime -->
+        <button id="follow-demo-btn" class="demo-unlock-btn" type="button" hidden>
+          本地预览模式：模拟已关注解锁全部功能
+        </button>
+      </div>
+    </div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>
