@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>方案 3 · 蜡笔儿童绘本 (Crayon Picture Book) — 65秒温馨宣传片预览</title>
+  <style>
+    :root {
+      --bg: #fdf5e7;
+      --card: #fffdf9;
+      --ink: #3c2f27;
+      --muted: #827164;
+      --accent: #e07a5f;
+      --border: rgba(88, 62, 46, 0.14);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      background: radial-gradient(circle at 80% 10%, #fff7eb, var(--bg));
+      color: var(--ink);
+      font-family: "PingFang SC", "Hiragino Maru Gothic ProN", "Noto Sans SC", system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 18px 16px 28px;
+    }
+    .wrap { width: min(1040px, 100%); display: flex; flex-direction: column; gap: 14px; }
+    .top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+    .title-group h1 { margin: 0; font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .pill { font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 999px; background: rgba(224, 122, 95, 0.16); color: #c75b3e; }
+    .title-group p { margin: 3px 0 0; font-size: 12.5px; color: var(--muted); }
+    .nav-links { display: flex; gap: 6px; flex-wrap: wrap; }
+    .nav-btn { text-decoration: none; font-size: 12px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); color: var(--ink); }
+    .nav-btn:hover { background: #f4e8d8; }
+    .nav-btn.active { background: var(--ink); color: #fff; border-color: transparent; }
+
+    .player-shell {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border-radius: 18px;
+      overflow: hidden;
+      background: #fdf6e9;
+      box-shadow: 0 22px 54px -24px rgba(68, 44, 28, 0.32);
+      border: 1px solid var(--border);
+    }
+    canvas#film { display: block; width: 100%; height: 100%; }
+    .controls {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .bar-row { display: flex; align-items: center; gap: 12px; }
+    .play-btn { height: 36px; padding: 0 16px; border-radius: 999px; border: none; background: var(--ink); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .time-readout { font-variant-numeric: tabular-nums; font-size: 12.5px; color: var(--muted); min-width: 92px; text-align: center; }
+    input[type="range"].scrub { flex: 1; accent-color: var(--accent); cursor: pointer; }
+    .chapters { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+    .chap { border: 1px solid var(--border); background: #fff9f0; color: var(--ink); border-radius: 10px; padding: 6px 8px; font-size: 11.5px; text-align: left; cursor: pointer; }
+    .chap.active { background: rgba(224, 122, 95, 0.16); border-color: var(--accent); color: #9c4028; font-weight: 600; }
+    .chap span { display: block; font-size: 10.5px; color: var(--muted); margin-top: 1px; }
+    @media (max-width: 720px) { .chapters { grid-template-columns: repeat(3, 1fr); } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="title-group">
+        <h1>方案 3 · 蜡笔儿童绘本 <span class="pill">Lemo-Opuscar · crayon-book</span></h1>
+        <p>《知喵的小太阳：每天摸摸头》· 油画棒颗粒笔触 × 2帧手绘微颤 × 睡前绘本童话治愈</p>
+      </div>
+      <nav class="nav-links">
+        <a class="nav-btn" href="./index.html">← 3套对比总览</a>
+        <a class="nav-btn" href="./draft-1-watercolor.html">方案1 水彩</a>
+        <a class="nav-btn" href="./draft-2-paper-popup.html">方案2 立体书</a>
+        <a class="nav-btn active" href="./draft-3-crayon-book.html">方案3 蜡笔绘本</a>
+      </nav>
+    </div>
+
+    <div class="player-shell">
+      <canvas id="film" width="1280" height="720"></canvas>
+    </div>
+
+    <div class="controls">
+      <div class="bar-row">
+        <button id="playBtn" class="play-btn" type="button">暂停 ⏸</button>
+        <input id="scrub" class="scrub" type="range" min="0" max="65" step="0.05" value="0" />
+        <div id="timeReadout" class="time-readout">00:00 / 01:05</div>
+      </div>
+      <div class="chapters" id="chapters"></div>
+    </div>
+  </div>
+
+  <script>
+    const DURATION = 65.0;
+    const ACTS = [
+      { id: 0, start: 0,  end: 10, title: '01 睡前小太阳', sub: '如果今天有点累，就来窗边看看这只晒着暖阳的小猫吧。' },
+      { id: 1, start: 10, end: 22, title: '02 呼噜摸摸头', sub: '顺着毛轻轻一摸，软乎乎的呼噜声就会像小马达一样在耳边响起来。' },
+      { id: 2, start: 22, end: 34, title: '03 拍屁股小脾气', sub: '拍拍圆屁股，尾巴立马开心地绷得直直的；逆毛搓炸了毛，会甩甩尾巴自己舔好哦。' },
+      { id: 3, start: 34, end: 46, title: '04 排梳与小红点', sub: '用木排梳给它梳出软绵绵的小毛球，再点亮小红点，陪它转着圈扑抓玩耍！' },
+      { id: 4, start: 46, end: 56, title: '05 捏只专属小猫', sub: '13 只性格各异的猫猫、专属捏猫工坊，还有 4 款可爱拍立得，把温柔存进云端。' },
+      { id: 5, start: 56, end: 65, title: '06 晚安呼噜', sub: '无论晴天、雨天还是星光夜晚，B站「知喵撸猫馆」都在这里陪你晚安。' },
+    ];
+
+    const canvas = document.getElementById('film');
+    const ctx = canvas.getContext('2d');
+    const W = 1280, H = 720;
+
+    // Warm sketch paper grain
+    const grain = document.createElement('canvas');
+    grain.width = 200; grain.height = 200;
+    const gctx = grain.getContext('2d');
+    const gd = gctx.createImageData(200, 200);
+    let sd = 4242;
+    const rnd = () => { sd = (sd * 16807) % 2147483647; return (sd - 1) / 2147483646; };
+    for (let i = 0; i < gd.data.length; i += 4) {
+      const v = 236 + Math.floor((rnd() - 0.5) * 34);
+      gd.data[i] = v; gd.data[i+1] = v - 7; gd.data[i+2] = v - 16; gd.data[i+3] = 34;
+    }
+    gctx.putImageData(gd, 0, 0);
+    const grainPat = ctx.createPattern(grain, 'repeat');
+
+    const clamp01 = v => Math.max(0, Math.min(1, v));
+    const ss = (a, b, x) => { const t = clamp01((x - a)/(b - a)); return t*t*(3 - 2*t); };
+
+    // Hand-drawn 2-frame crayon boil jitter
+    function boil(t, idx) {
+      const frame = Math.floor(t * 6); // classic 6fps storybook boil
+      return Math.sin(frame * 12.9898 + idx * 78.233) * 2.4;
+    }
+
+    function crayonEllipse(cx, cy, rx, ry, fill, stroke, t, seedIdx) {
+      ctx.save();
+      ctx.fillStyle = fill;
+      ctx.beginPath();
+      for (let i = 0; i <= 24; i++) {
+        const a = (i / 24) * Math.PI * 2;
+        const j = boil(t, seedIdx + i) * 0.9;
+        const x = cx + Math.cos(a) * (rx + j);
+        const y = cy + Math.sin(a) * (ry + j);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+      if (stroke) {
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = 4.2;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawCrayonHeart(x, y, s, col, t, idx) {
+      ctx.save();
+      ctx.translate(x + boil(t, idx), y + boil(t, idx + 3));
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.moveTo(0, s * 0.35);
+      ctx.bezierCurveTo(-s, -s * 0.4, -s * 0.5, -s * 1.1, 0, -s * 0.35);
+      ctx.bezierCurveTo(s * 0.5, -s * 1.1, s, -s * 0.4, 0, s * 0.35);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawCrayonCat(cx, cy, scale, opts) {
+      const { t, coat = 'orange', tailMode = 'relax', ruffle = 0, heading = 0 } = opts;
+      const pals = {
+        orange: { body: '#f2a45c', stroke: '#9b5526', stripe: '#d27332', cheek: '#f78d84', ear: '#f4b5a6' },
+        black:  { body: '#45414b', stroke: '#232028', stripe: '#2e2a33', cheek: '#e88b8b', ear: '#7e6369' },
+        calico: { body: '#fff7eb', stroke: '#6c5444', stripe: '#e58d46', cheek: '#f79c96', ear: '#f3bbb2' },
+      };
+      const pal = pals[coat] || pals.orange;
+
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(heading);
+      ctx.scale(scale, scale);
+
+      const breath = 1 + 0.025 * Math.sin(t * 2.2);
+
+      // Soft crayon cushion rug beneath cat
+      crayonEllipse(0, 14, 240, 118, '#f4e4c9', '#d2ba96', t, 10);
+
+      // Tail with crayon stroke
+      ctx.save();
+      ctx.strokeStyle = pal.body;
+      ctx.lineWidth = 34 + ruffle * 10;
+      ctx.lineCap = 'round';
+      let tx2 = 228, ty2 = 28, tx3 = 198, ty3 = 104;
+      if (tailMode === 'stiff') {
+        tx2 = 240; ty2 = -16; tx3 = 328; ty3 = -28 + boil(t, 5);
+      } else if (tailMode === 'lash') {
+        const s = Math.sin(t * 13) * 86;
+        tx2 = 225; ty2 = s * 0.55; tx3 = 296; ty3 = s;
+      } else {
+        const s = Math.sin(t * 2.0) * (tailMode === 'wag' ? 22 : 9);
+        ty2 += s * 0.6; ty3 += s;
+      }
+      ctx.beginPath(); ctx.moveTo(132, -2); ctx.quadraticCurveTo(tx2, ty2, tx3, ty3); ctx.stroke();
+      ctx.strokeStyle = pal.stroke;
+      ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(132, -16); ctx.quadraticCurveTo(tx2, ty2 - 14, tx3, ty3 - 14); ctx.stroke();
+      ctx.restore();
+
+      // Chunky storybook loaf body
+      ctx.save();
+      ctx.scale(1, breath);
+      crayonEllipse(14, 0, 152, 76, pal.body, pal.stroke, t, 30);
+      if (coat === 'orange') {
+        ctx.strokeStyle = pal.stripe;
+        ctx.lineWidth = 10;
+        ctx.lineCap = 'round';
+        for (let i = -2; i <= 2; i++) {
+          ctx.beginPath();
+          ctx.moveTo(14 + i * 42 + boil(t, i), -56);
+          ctx.lineTo(14 + i * 42 + boil(t, i + 9), -18);
+          ctx.stroke();
+        }
+      } else if (coat === 'calico') {
+        crayonEllipse(62, -18, 48, 36, '#e58d46', null, t, 41);
+        crayonEllipse(-18, 22, 42, 32, '#3c3635', null, t, 48);
+      }
+      if (ruffle > 0.1) {
+        ctx.strokeStyle = pal.stroke;
+        ctx.lineWidth = 3.5;
+        for (let i = 0; i < 14; i++) {
+          const a = -2.2 + (i / 13) * 4.4;
+          const x0 = 14 + Math.cos(a) * 146;
+          const y0 = Math.sin(a) * 72;
+          ctx.beginPath();
+          ctx.moveTo(x0, y0);
+          ctx.lineTo(x0 + Math.cos(a) * 18 * ruffle, y0 + Math.sin(a) * 18 * ruffle);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+
+      // Cute storybook round head + velvety rounded ears
+      ctx.save();
+      ctx.translate(-134, 0);
+      // Ears
+      const drawEar = (ex, ey, rot) => {
+        ctx.save(); ctx.translate(ex, ey); ctx.rotate(rot);
+        ctx.fillStyle = pal.body; ctx.strokeStyle = pal.stroke; ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(-22, 8); ctx.quadraticCurveTo(-18, -36, 0, -44); ctx.quadraticCurveTo(18, -36, 22, 8);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = pal.ear;
+        ctx.beginPath();
+        ctx.moveTo(-11, -2); ctx.quadraticCurveTo(-9, -24, 0, -28); ctx.quadraticCurveTo(9, -24, 11, -2);
+        ctx.closePath(); ctx.fill();
+        ctx.restore();
+      };
+      drawEar(4, -44, -0.48);
+      drawEar(-6, 44, -2.56);
+
+      crayonEllipse(-4, 0, 62, 56, pal.body, pal.stroke, t, 60);
+      // Warm rosy storybook cheek glow
+      ctx.fillStyle = pal.cheek + '66';
+      ctx.beginPath(); ctx.arc(-28, -28, 12, 0, Math.PI * 2); ctx.arc(-28, 28, 12, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+
+      ctx.restore();
+    }
+
+    function drawSubtitle(text, alpha, isNight) {
+      if (!text || alpha < 0.02) return;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.font = '600 25px "PingFang SC", "Hiragino Maru Gothic ProN", sans-serif';
+      const tw = ctx.measureText(text).width;
+      const bw = Math.min(W - 140, tw + 56);
+      const bx = (W - bw) / 2;
+      const by = H - 84;
+      ctx.fillStyle = isNight ? 'rgba(26, 36, 58, 0.82)' : 'rgba(255, 250, 240, 0.90)';
+      ctx.strokeStyle = isNight ? 'rgba(255, 232, 168, 0.35)' : 'rgba(196, 132, 92, 0.38)';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.roundRect(bx, by, bw, 50, 25); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = isNight ? '#fff5dc' : '#4a3529';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, W / 2, by + 26, bw - 32);
+      ctx.restore();
+    }
+
+    function render(t) {
+      const isRain = t >= 56.5 && t < 60.0;
+      const isNight = t >= 60.0;
+
+      // Storybook sky/paper backdrop
+      ctx.fillStyle = isNight ? '#1f2842' : isRain ? '#e2eaf2' : '#fdf5e6';
+      ctx.fillRect(0, 0, W, H);
+
+      // Hand-drawn storybook page margin frame
+      ctx.strokeStyle = isNight ? 'rgba(255, 235, 175, 0.22)' : 'rgba(204, 152, 112, 0.30)';
+      ctx.lineWidth = 4;
+      ctx.setLineDash([14, 10]);
+      ctx.beginPath(); ctx.roundRect(28, 24, W - 56, H - 48, 26); ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Warm sun / crescent moon doodle in upper-left corner
+      if (isNight) {
+        ctx.fillStyle = '#ffe596';
+        ctx.beginPath(); ctx.arc(145, 115, 34, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#1f2842';
+        ctx.beginPath(); ctx.arc(160, 106, 30, 0, Math.PI * 2); ctx.fill();
+        // Twinkling crayon stars
+        ctx.fillStyle = '#ffebb0';
+        for (let i = 0; i < 14; i++) {
+          const sx = 240 + i * 74;
+          const sy = 75 + (i % 3) * 38;
+          const r = 3 + 1.5 * Math.sin(t * 3 + i);
+          ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.fill();
+        }
+      } else if (!isRain) {
+        ctx.fillStyle = '#ffd57e';
+        ctx.beginPath(); ctx.arc(145, 115, 36 + boil(t, 2)*0.4, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#f5b855';
+        ctx.lineWidth = 4;
+        ctx.lineCap = 'round';
+        for (let i = 0; i < 8; i++) {
+          const a = i * Math.PI / 4 + t * 0.2;
+          ctx.beginPath();
+          ctx.moveTo(145 + Math.cos(a) * 46, 115 + Math.sin(a) * 46);
+          ctx.lineTo(145 + Math.cos(a) * 60, 115 + Math.sin(a) * 60);
+          ctx.stroke();
+        }
+      }
+
+      if (t < 10) {
+        drawCrayonCat(650, 395, 1.05, { t, coat: 'orange', tailMode: 'relax' });
+        const a = ss(1.0, 2.5, t) * (1 - ss(8.4, 9.6, t));
+        ctx.save(); ctx.globalAlpha = a;
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#6b4228';
+        ctx.font = '700 44px "PingFang SC", "Hiragino Maru Gothic ProN", sans-serif';
+        ctx.fillText('知喵的小太阳 · 每日摸摸头', W / 2, 136);
+        ctx.restore();
+      } else if (t < 22) {
+        const lt = t - 10;
+        drawCrayonCat(650, 395, 1.06, { t, coat: 'orange', tailMode: 'wag' });
+        // Floating crayon hearts & music notes
+        for (let i = 0; i < 4; i++) {
+          const p = (lt * 0.45 + i * 0.25) % 1;
+          drawCrayonHeart(460 + i * 95, 310 - p * 120, 14 * (1 - p * 0.3), 'rgba(240, 128, 128, ' + (1 - p) + ')', t, i * 5);
+        }
+      } else if (t < 34) {
+        const lt = t - 22;
+        if (lt < 5.5) {
+          drawCrayonCat(610, 395, 1.02, { t, coat: 'orange', tailMode: 'stiff' });
+          drawCrayonHeart(760, 260, 18, '#f08672', t, 99);
+        } else {
+          drawCrayonCat(640, 395, 1.02, { t, coat: 'orange', tailMode: lt < 9 ? 'lash' : 'relax', ruffle: lt < 9 ? 1.0 : 0.2 });
+        }
+      } else if (t < 46) {
+        const lt = t - 34;
+        if (lt < 6) {
+          drawCrayonCat(640, 395, 1.02, { t, coat: 'calico', tailMode: 'wag' });
+          for (let i = 0; i < 3; i++) {
+            crayonEllipse(510 + i * 115, 545, 22, 19, '#fff5e4', '#c9b296', t, 80 + i);
+          }
+        } else {
+          const orb = (lt - 6) * 1.6;
+          const lx = 640 + Math.cos(orb) * 250;
+          const ly = 395 + Math.sin(orb) * 135;
+          drawCrayonCat(640, 395, 0.94, { t, coat: 'black', tailMode: 'wag', heading: Math.atan2(395 - ly, 640 - lx) });
+          ctx.fillStyle = '#ff4b4b';
+          ctx.beginPath(); ctx.arc(lx, ly, 10, 0, Math.PI * 2); ctx.fill();
+        }
+      } else if (t < 56) {
+        const lt = t - 46;
+        const cs = ['orange', 'calico', 'black'];
+        drawCrayonCat(640, 395, 1.0, { t, coat: cs[Math.floor(lt / 2.2) % cs.length], tailMode: 'wag' });
+        drawCrayonHeart(330, 240, 16, '#f497a9', t, 12);
+        drawCrayonHeart(960, 240, 16, '#f6b36b', t, 18);
+      } else {
+        drawCrayonCat(640, 418, 1.0, { t, coat: 'orange', tailMode: 'relax' });
+        if (isRain) {
+          ctx.strokeStyle = 'rgba(105, 145, 185, 0.5)';
+          ctx.lineWidth = 3;
+          for (let i = 0; i < 28; i++) {
+            const rx = (i * 52 + t * 80) % W;
+            const ry = (i * 71 + t * 280) % H;
+            ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx - 6, ry + 22); ctx.stroke();
+          }
+        }
+        if (t > 60.2) {
+          ctx.save();
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#fff5dc';
+          ctx.font = '700 46px "PingFang SC", "Hiragino Maru Gothic ProN", sans-serif';
+          ctx.fillText('晚安，知喵撸猫馆 🌙', W / 2, 168);
+          ctx.font = '400 20px "PingFang SC", sans-serif';
+          ctx.fillStyle = '#c9d7f0';
+          ctx.fillText('B站关注 UP 主「知喵~」· 免费解锁 13 只猫与可爱拍立得', W / 2, 214);
+          ctx.restore();
+        }
+      }
+
+      if (grainPat) {
+        ctx.fillStyle = grainPat;
+        ctx.fillRect(0, 0, W, H);
+      }
+
+      const act = ACTS.find(a => t >= a.start && t < a.end) || ACTS[ACTS.length - 1];
+      const subAlpha = ss(act.start + 0.25, act.start + 0.7, t) * (1 - ss(act.end - 0.55, act.end - 0.1, t));
+      drawSubtitle(act.sub, subAlpha, isNight);
+    }
+
+    const playBtn = document.getElementById('playBtn');
+    const scrub = document.getElementById('scrub');
+    const timeReadout = document.getElementById('timeReadout');
+    const chaptersEl = document.getElementById('chapters');
+
+    const chapBtns = ACTS.map((a) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'chap';
+      b.innerHTML = `${a.title}<span>0:${String(a.start).padStart(2,'0')}–${a.end >= 60 ? '1:0' + (a.end - 60) : '0:' + String(a.end).padStart(2,'0')}</span>`;
+      b.onclick = () => { curT = a.start; scrub.value = curT; render(curT); syncUi(); };
+      chaptersEl.appendChild(b);
+      return b;
+    });
+
+    let playing = true, curT = 0, lastTs = performance.now();
+    const fmt = s => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+    function syncUi() {
+      scrub.value = curT.toFixed(2);
+      timeReadout.textContent = `${fmt(curT)} / 01:05`;
+      chapBtns.forEach((b, i) => {
+        const a = ACTS[i];
+        b.classList.toggle('active', curT >= a.start && (curT < a.end || (i === ACTS.length - 1 && curT >= a.start)));
+      });
+    }
+    playBtn.onclick = () => { playing = !playing; playBtn.textContent = playing ? '暂停 ⏸' : '播放 ▶'; };
+    scrub.oninput = () => { curT = Number(scrub.value); render(curT); syncUi(); };
+    function tick(ts) {
+      const dt = Math.min(0.05, (ts - lastTs) / 1000); lastTs = ts;
+      if (playing) { curT += dt; if (curT > DURATION) curT = 0; }
+      render(curT); syncUi(); requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  </script>
+</body>
+</html>

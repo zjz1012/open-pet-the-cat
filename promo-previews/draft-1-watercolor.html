@@ -1,0 +1,772 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>方案 1 · 水彩笔刷 (Watercolor Brush) — 65秒温馨宣传片预览</title>
+  <style>
+    :root {
+      --bg: #f6f0e4;
+      --card: #fffdf8;
+      --ink: #382e26;
+      --muted: #7c6f63;
+      --accent: #c77b43;
+      --border: rgba(74, 58, 44, 0.14);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      background: radial-gradient(circle at 20% 10%, #fdf8ee, var(--bg));
+      color: var(--ink);
+      font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 18px 16px 28px;
+    }
+    .wrap {
+      width: min(1040px, 100%);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .title-group h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .pill {
+      font-size: 11.5px;
+      font-weight: 600;
+      padding: 2px 9px;
+      border-radius: 999px;
+      background: rgba(199, 123, 67, 0.14);
+      color: var(--accent);
+    }
+    .title-group p {
+      margin: 3px 0 0;
+      font-size: 12.5px;
+      color: var(--muted);
+    }
+    .nav-links {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .nav-btn {
+      text-decoration: none;
+      font-size: 12px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--ink);
+      transition: background 0.15s;
+    }
+    .nav-btn:hover { background: #efe5d5; }
+    .nav-btn.active { background: var(--ink); color: #fff; border-color: transparent; }
+
+    .player-shell {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border-radius: 18px;
+      overflow: hidden;
+      background: #f5ede0;
+      box-shadow: 0 22px 54px -24px rgba(56, 42, 28, 0.35), 0 4px 12px rgba(56, 42, 28, 0.1);
+      border: 1px solid var(--border);
+    }
+    canvas#film {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    .controls {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      box-shadow: 0 8px 24px -16px rgba(56, 42, 28, 0.2);
+    }
+    .bar-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .play-btn {
+      height: 36px;
+      padding: 0 16px;
+      border-radius: 999px;
+      border: none;
+      background: var(--ink);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .play-btn:hover { opacity: 0.9; }
+    .time-readout {
+      font-variant-numeric: tabular-nums;
+      font-size: 12.5px;
+      color: var(--muted);
+      min-width: 92px;
+      text-align: center;
+    }
+    input[type="range"].scrub {
+      flex: 1;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+    .chapters {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 6px;
+    }
+    .chap {
+      border: 1px solid var(--border);
+      background: #faf5ec;
+      color: var(--ink);
+      border-radius: 10px;
+      padding: 6px 8px;
+      font-size: 11.5px;
+      text-align: left;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .chap:hover { background: #f0e5d4; }
+    .chap.active {
+      background: rgba(199, 123, 67, 0.15);
+      border-color: var(--accent);
+      color: #7a4218;
+      font-weight: 600;
+    }
+    .chap span { display: block; font-size: 10.5px; color: var(--muted); margin-top: 1px; }
+    @media (max-width: 720px) {
+      .chapters { grid-template-columns: repeat(3, 1fr); }
+    }
+    body.embed { padding: 0; background: transparent; overflow: hidden; }
+    body.embed .wrap { width: 100vw; gap: 0; }
+    body.embed .top, body.embed .controls { display: none; }
+    body.embed .player-shell { border-radius: 0; border: none; box-shadow: none; width: 100vw; height: 100vh; aspect-ratio: auto; }
+  </style>
+</head>
+<body>
+  <script>if (location.search.includes('embed=1')) document.body.classList.add('embed');</script>
+  <div class="wrap">
+    <div class="top">
+      <div class="title-group">
+        <h1>方案 1 · 水彩笔刷 <span class="pill">Lemo-Opuscar · watercolor</span></h1>
+        <p>《窗边呼噜：一场 65 秒的午后治愈》· 湿画法晕染 × 暖阳雨夜渐变 × 诗意 ASMR 氛围</p>
+      </div>
+      <nav class="nav-links">
+        <a class="nav-btn" href="./index.html">← 3套对比总览</a>
+        <a class="nav-btn active" href="./draft-1-watercolor.html">方案1 水彩</a>
+        <a class="nav-btn" href="./draft-2-paper-popup.html">方案2 立体书</a>
+        <a class="nav-btn" href="./draft-3-crayon-book.html">方案3 蜡笔绘本</a>
+      </nav>
+    </div>
+
+    <div class="player-shell">
+      <canvas id="film" width="1280" height="720"></canvas>
+    </div>
+
+    <div class="controls">
+      <div class="bar-row">
+        <button id="playBtn" class="play-btn" type="button">暂停 ⏸</button>
+        <input id="scrub" class="scrub" type="range" min="0" max="65" step="0.05" value="0" />
+        <div id="timeReadout" class="time-readout">00:00 / 01:05</div>
+      </div>
+      <div class="chapters" id="chapters"></div>
+    </div>
+  </div>
+
+  <script>
+    const DURATION = 65.0;
+    const ACTS = [
+      { id: 0, start: 0,  end: 10, title: '01 窗边暖阳', sub: '忙了一整天，有没有想过……此刻有一只暖呼呼的小猫，正在窗边等你？' },
+      { id: 1, start: 10, end: 22, title: '02 贴耳呼噜', sub: '轻轻滑过它的背脊，20层实时蓬松毛发随指尖起伏，呼噜声也在耳边慢慢响起。' },
+      { id: 2, start: 22, end: 34, title: '03 拍屁股与炸毛', sub: '轻点拍拍圆屁股，尾巴立马开心绷直；逆毛搓炸了毛，会气呼呼甩尾再自己舔顺。' },
+      { id: 3, start: 34, end: 46, title: '04 排梳与激光', sub: '换把木质排梳攒出软乎乎的小毛球，或晃晃红点激光笔，看它绕着垫子转圈扑抓。' },
+      { id: 4, start: 46, end: 56, title: '05 捏猫与拍立得', sub: '13种猫咪随心切换，还能亲手捏猫、选可爱相纸拍立得留念，云存档下次接着撸。' },
+      { id: 5, start: 56, end: 65, title: '06 晴雨夜落版', sub: '晴日暖阳、雨天白噪音、月光晚安……来 B站「知喵撸猫馆」，随时领走你的呼噜治愈。' },
+    ];
+
+    const canvas = document.getElementById('film');
+    const ctx = canvas.getContext('2d');
+    const W = 1280, H = 720;
+
+    // Pre-generate cold-press watercolor paper grain offscreen
+    const paperCanvas = document.createElement('canvas');
+    paperCanvas.width = 256;
+    paperCanvas.height = 256;
+    const pctx = paperCanvas.getContext('2d');
+    const img = pctx.createImageData(256, 256);
+    let seed = 1337;
+    const rand = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+    for (let i = 0; i < img.data.length; i += 4) {
+      const n = 232 + Math.floor((rand() - 0.5) * 26);
+      img.data[i] = n;
+      img.data[i+1] = n - 5;
+      img.data[i+2] = n - 14;
+      img.data[i+3] = 28;
+    }
+    pctx.putImageData(img, 0, 0);
+    const paperPat = ctx.createPattern(paperCanvas, 'repeat');
+
+    const clamp01 = v => Math.max(0, Math.min(1, v));
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const ease = t => t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2)/2;
+    const ss = (a, b, x) => { const t = clamp01((x - a)/(b - a)); return t*t*(3 - 2*t); };
+
+    function washBlob(x, y, rx, ry, rot, rgbaInner, rgbaOuter) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rot);
+      const g = ctx.createRadialGradient(0, 0, Math.min(rx, ry) * 0.12, 0, 0, Math.max(rx, ry));
+      g.addColorStop(0, rgbaInner);
+      g.addColorStop(0.72, rgbaInner);
+      g.addColorStop(1, rgbaOuter);
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      for (let i = 0; i <= 28; i++) {
+        const a = (i / 28) * Math.PI * 2;
+        const wob = 1 + 0.06 * Math.sin(a * 3 + x * 0.02) + 0.04 * Math.cos(a * 5 + y * 0.02);
+        const px = Math.cos(a) * rx * wob;
+        const py = Math.sin(a) * ry * wob;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawWatercolorCat(cx, cy, scale, opts) {
+      const {
+        t,
+        coat = 'orange',
+        tailMode = 'relax', // relax | stiff | lash | wag
+        ruffle = 0,
+        groom = 0,
+        earSquish = 0,
+        heading = 0,
+        rumpLift = 0,
+      } = opts;
+
+      const palettes = {
+        orange: { main: '#df9450', dark: '#a95722', light: '#f8dfc1', ear: '#e5b3a0' },
+        black:  { main: '#333036', dark: '#1a181e', light: '#57535c', ear: '#6b5358' },
+        calico: { main: '#f3ece2', dark: '#2d2827', light: '#d9843b', ear: '#e3b3a6' },
+        ragdoll:{ main: '#f4efe9', dark: '#8d8077', light: '#d5cbc2', ear: '#d9b5ae' },
+        white:  { main: '#faf7f2', dark: '#ddd6cc', light: '#ffffff', ear: '#f0c5c2' },
+      };
+      const pal = palettes[coat] || palettes.orange;
+
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(heading);
+      ctx.scale(scale, scale);
+
+      const breath = 1 + 0.022 * Math.sin(t * 2.1);
+
+      // Soft watercolor contact shadow
+      washBlob(12, 26, 215, 96, 0.02, 'rgba(95, 72, 52, 0.16)', 'rgba(95, 72, 52, 0)');
+
+      // Tail geometry
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      let tx1 = 155, ty1 = -4 - rumpLift * 14;
+      let tx2, ty2, tx3, ty3;
+      if (tailMode === 'stiff') {
+        const vib = Math.sin(t * 28) * 3;
+        tx2 = 255; ty2 = -18 + vib;
+        tx3 = 345; ty3 = -30 + vib * 1.4;
+      } else if (tailMode === 'lash') {
+        const sw = Math.sin(t * 13) * 92;
+        tx2 = 245; ty2 = sw * 0.55;
+        tx3 = 315; ty3 = sw;
+      } else {
+        const sw = Math.sin(t * 1.8) * (tailMode === 'wag' ? 22 : 9);
+        tx2 = 248; ty2 = 28 + sw * 0.6;
+        tx3 = 215 + sw * 0.3; ty3 = 108 + sw;
+      }
+
+      // Watercolor tail wash
+      ctx.strokeStyle = pal.main;
+      ctx.lineWidth = 34 + ruffle * 14;
+      ctx.globalAlpha = 0.88;
+      ctx.beginPath();
+      ctx.moveTo(tx1, ty1);
+      ctx.quadraticCurveTo(tx2, ty2, tx3, ty3);
+      ctx.stroke();
+
+      // Tail stripes / rings
+      ctx.strokeStyle = pal.dark;
+      ctx.lineWidth = 30 + ruffle * 10;
+      ctx.setLineDash([12, 16]);
+      ctx.globalAlpha = 0.48;
+      ctx.beginPath();
+      ctx.moveTo(tx1 + 12, ty1);
+      ctx.quadraticCurveTo(tx2, ty2, tx3, ty3);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+
+      // Plump watercolor loaf torso
+      ctx.save();
+      ctx.scale(1, breath);
+      washBlob(18, -rumpLift * 8, 178, 86, 0, pal.main, 'rgba(220,160,100,0)');
+      ctx.globalAlpha = 0.92;
+      ctx.fillStyle = pal.main;
+      ctx.beginPath();
+      ctx.ellipse(18, -rumpLift * 6, 162, 76, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Coat pattern washes (tabby stripes / calico patches / ragdoll gradient)
+      ctx.save();
+      ctx.beginPath();
+      ctx.ellipse(18, -rumpLift * 6, 160, 74, 0, 0, Math.PI * 2);
+      ctx.clip();
+      if (coat === 'orange') {
+        for (let i = -3; i <= 3; i++) {
+          washBlob(18 + i * 38, -10, 18, 68, 0.14 * i, 'rgba(169,87,34,0.42)', 'rgba(169,87,34,0)');
+        }
+        washBlob(18, -6, 145, 16, 0, 'rgba(145,68,20,0.34)', 'rgba(145,68,20,0)');
+      } else if (coat === 'calico') {
+        washBlob(65, -24, 72, 54, -0.2, 'rgba(217,132,59,0.85)', 'rgba(217,132,59,0)');
+        washBlob(-28, 22, 68, 46, 0.3, 'rgba(45,40,39,0.82)', 'rgba(45,40,39,0)');
+        washBlob(95, 24, 52, 42, -0.3, 'rgba(45,40,39,0.78)', 'rgba(45,40,39,0)');
+      } else if (coat === 'ragdoll') {
+        washBlob(20, -10, 110, 56, 0, 'rgba(141,128,119,0.32)', 'rgba(141,128,119,0)');
+      }
+      // Warm sunlit top highlight wash
+      washBlob(-12, -32, 130, 38, -0.15, 'rgba(255,248,232,0.35)', 'rgba(255,248,232,0)');
+      ctx.restore();
+
+      // Bristled fur strokes when ruffled ("炸毛")
+      if (ruffle > 0.05) {
+        ctx.save();
+        ctx.strokeStyle = pal.dark;
+        ctx.globalAlpha = 0.55 * ruffle;
+        ctx.lineWidth = 2.4;
+        for (let i = 0; i < 24; i++) {
+          const ang = -2.4 + (i / 23) * 4.8;
+          const bx = 18 + Math.cos(ang) * 145;
+          const by = Math.sin(ang) * 68;
+          const len = (14 + (i % 3) * 7) * ruffle;
+          ctx.beginPath();
+          ctx.moveTo(bx, by);
+          ctx.lineTo(bx + Math.cos(ang) * len, by + Math.sin(ang) * len);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+      ctx.restore();
+
+      // Round tucked cat head (organic overhead pose, no uncanny face!)
+      ctx.save();
+      ctx.translate(-142 + groom * 18, groom * 26);
+      ctx.rotate(groom * 0.62);
+
+      // Ears fused organically into crown
+      const drawEar = (ex, ey, rot) => {
+        ctx.save();
+        ctx.translate(ex, ey);
+        ctx.rotate(rot);
+        ctx.fillStyle = pal.main;
+        ctx.beginPath();
+        ctx.moveTo(-22, 8);
+        ctx.quadraticCurveTo(-18, -36, 0, -44);
+        ctx.quadraticCurveTo(18, -36, 22, 8);
+        ctx.closePath();
+        ctx.fill();
+        // Smooth velvety tip tint
+        const eg = ctx.createLinearGradient(0, 6, 0, -42);
+        eg.addColorStop(0, 'rgba(229,179,160,0)');
+        eg.addColorStop(0.55, pal.ear + '88');
+        eg.addColorStop(1, pal.ear + 'cc');
+        ctx.fillStyle = eg;
+        ctx.fill();
+        ctx.restore();
+      };
+      drawEar(4, -44, -0.52 + earSquish * 0.45);
+      drawEar(-8, 44, -2.55 - earSquish * 0.45);
+
+      ctx.fillStyle = pal.main;
+      ctx.beginPath();
+      ctx.ellipse(-6, 0, 64, 58, 0, 0, Math.PI * 2);
+      ctx.fill();
+      if (coat === 'orange') {
+        washBlob(-6, -12, 44, 10, 0.1, 'rgba(169,87,34,0.38)', 'rgba(169,87,34,0)');
+        washBlob(-6, 12, 44, 10, -0.1, 'rgba(169,87,34,0.34)', 'rgba(169,87,34,0)');
+      } else if (coat === 'calico') {
+        washBlob(-12, -24, 38, 28, 0, 'rgba(217,132,59,0.75)', 'rgba(217,132,59,0)');
+        washBlob(-8, 20, 32, 24, 0, 'rgba(45,40,39,0.68)', 'rgba(45,40,39,0)');
+      }
+      // Subtle watercolor rim edge
+      ctx.strokeStyle = 'rgba(110, 75, 50, 0.18)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.restore();
+    }
+
+    function drawWatercolorHand(x, y, press) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(-0.12);
+      ctx.scale(1 - press * 0.06, 1 - press * 0.06);
+      washBlob(6, 14, 58, 42, 0, 'rgba(80,55,40,0.16)', 'rgba(80,55,40,0)');
+      ctx.fillStyle = '#f2cbb4';
+      ctx.strokeStyle = 'rgba(165, 110, 82, 0.45)';
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.roundRect(-42, -32, 84, 72, 28);
+      ctx.fill();
+      ctx.stroke();
+      // Soft fingers
+      for (let i = 0; i < 4; i++) {
+        ctx.beginPath();
+        ctx.roundRect(-34 + i * 19, -68 + Math.abs(i - 1.5) * 6, 16, 46, 8);
+        ctx.fill();
+        ctx.stroke();
+      }
+      // Warm sleeve
+      ctx.fillStyle = '#e7dfd3';
+      ctx.beginPath();
+      ctx.roundRect(-38, 26, 76, 180, 14);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawComb(x, y) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.fillStyle = '#6f4729';
+      ctx.beginPath();
+      ctx.roundRect(0, -68, 26, 136, 12);
+      ctx.fill();
+      ctx.strokeStyle = '#d9c8ae';
+      ctx.lineWidth = 4;
+      ctx.lineCap = 'round';
+      for (let i = -52; i <= 52; i += 15) {
+        ctx.beginPath();
+        ctx.moveTo(0, i);
+        ctx.lineTo(-34, i);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawSubtitle(text, alpha, isNight) {
+      if (!text || alpha < 0.02) return;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.font = '500 26px "PingFang SC", "Hiragino Sans GB", sans-serif';
+      const tw = ctx.measureText(text).width;
+      const bw = Math.min(W - 120, tw + 52);
+      const bx = (W - bw) / 2;
+      const by = H - 84;
+      ctx.fillStyle = isNight ? 'rgba(18, 28, 44, 0.72)' : 'rgba(255, 250, 241, 0.84)';
+      ctx.beginPath();
+      ctx.roundRect(bx, by, bw, 50, 25);
+      ctx.fill();
+      ctx.fillStyle = isNight ? '#e6eefc' : '#3a2f26';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, W / 2, by + 26, bw - 32);
+      ctx.restore();
+    }
+
+    function render(t) {
+      // Atmosphere blend in Act 6 (56..65: day -> rain -> night)
+      const rainMix = ss(56.5, 58.2, t) * (1 - ss(59.8, 61.5, t));
+      const nightMix = ss(59.8, 61.8, t);
+
+      // 1) Watercolor paper & ambient wash background
+      ctx.fillStyle = nightMix > 0.5 ? '#1c2639' : rainMix > 0.3 ? '#dde5ed' : '#fbf4e7';
+      ctx.fillRect(0, 0, W, H);
+
+      // Cushion watercolor washes
+      if (nightMix < 0.85) {
+        washBlob(660, 410, 560, 320, -0.06, 'rgba(222, 205, 178, 0.62)', 'rgba(222, 205, 178, 0)');
+        washBlob(220, 140, 340, 220, -0.35, 'rgba(244, 214, 168, 0.45)', 'rgba(244, 214, 168, 0)');
+      } else {
+        washBlob(660, 410, 560, 320, -0.06, 'rgba(56, 78, 112, 0.48)', 'rgba(56, 78, 112, 0)');
+      }
+
+      // Diagonal window sunbeams / moonbeams
+      ctx.save();
+      ctx.globalAlpha = nightMix > 0.5 ? 0.22 : (1 - rainMix * 0.6) * 0.28;
+      ctx.fillStyle = nightMix > 0.5 ? '#9bc0f5' : '#fff3cf';
+      for (let i = 0; i < 3; i++) {
+        const sway = Math.sin(t * 0.6 + i) * 14;
+        ctx.beginPath();
+        ctx.moveTo(140 + i * 220 + sway, 0);
+        ctx.lineTo(290 + i * 220 + sway, 0);
+        ctx.lineTo(540 + i * 220 + sway, H);
+        ctx.lineTo(390 + i * 220 + sway, H);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+
+      // Act-specific choreography
+      if (t < 10) {
+        // Act 1: Sunlit morning reveal + gentle title card
+        const p = ss(0, 2.2, t);
+        drawWatercolorCat(650, 385, 1.05, { t, coat: 'orange', tailMode: 'relax' });
+        // Floating sunlit dust motes
+        ctx.fillStyle = 'rgba(255, 240, 195, 0.72)';
+        for (let i = 0; i < 18; i++) {
+          const dx = (180 + i * 62 + Math.sin(t * 0.8 + i) * 28) % W;
+          const dy = (120 + i * 37 - t * 14 + H) % H;
+          ctx.beginPath();
+          ctx.arc(dx, dy, 2.5 + (i % 3), 0, Math.PI * 2);
+          ctx.fill();
+        }
+        // Subtle editorial title fade-in
+        const titleA = ss(1.2, 2.8, t) * (1 - ss(8.2, 9.6, t));
+        ctx.save();
+        ctx.globalAlpha = titleA;
+        ctx.fillStyle = '#5c4330';
+        ctx.font = '600 44px "PingFang SC", serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('知喵撸猫馆', W / 2, 136);
+        ctx.font = '400 18px "PingFang SC", sans-serif';
+        ctx.fillStyle = '#8b725b';
+        ctx.fillText('WATERCOLOR EDITION · 窗边午后的 65 秒呼噜治愈', W / 2, 174);
+        ctx.restore();
+      } else if (t < 22) {
+        // Act 2: Gentle petting + purr ripple rings
+        const lt = t - 10;
+        const sweep = Math.sin(lt * 1.45);
+        const hx = 630 + sweep * 145;
+        const hy = 355 - Math.abs(sweep) * 18;
+        const earSq = ss(520, 480, hx) * 0.7;
+        drawWatercolorCat(650, 385, 1.08, { t, coat: 'orange', tailMode: 'wag', earSquish: earSq });
+        drawWatercolorHand(hx, hy, 0.55 + 0.35 * Math.cos(lt * 1.45));
+
+        // Soft expanding purr soundwave watercolor rings
+        for (let r = 0; r < 3; r++) {
+          const phase = (lt * 0.75 + r * 0.33) % 1;
+          ctx.save();
+          ctx.strokeStyle = `rgba(199, 123, 67, ${(1 - phase) * 0.35})`;
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.arc(540, 345, 55 + phase * 155, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+        ctx.save();
+        ctx.fillStyle = 'rgba(138, 86, 46, 0.78)';
+        ctx.font = '500 20px "PingFang SC", sans-serif';
+        ctx.fillText('♪ 呼噜噜…', 430, 235 + Math.sin(t * 3) * 6);
+        ctx.restore();
+      } else if (t < 34) {
+        // Act 3: Butt pat (stiff tail!) -> reverse rub bristle -> lash -> self-groom
+        const lt = t - 22;
+        if (lt < 5.5) {
+          const pat = Math.max(0, Math.sin(lt * 6.5));
+          drawWatercolorCat(610, 390, 1.04, { t, coat: 'orange', tailMode: 'stiff', rumpLift: 0.65 + pat * 0.3 });
+          drawWatercolorHand(745, 345 - pat * 36, pat);
+          ctx.fillStyle = 'rgba(199, 123, 67, 0.85)';
+          ctx.font = '600 22px "PingFang SC", sans-serif';
+          ctx.fillText('拍猫屁股 ×3 · 尾巴绷直！🐾', 790, 260 - pat * 10);
+        } else if (lt < 9.0) {
+          const ruf = ss(5.5, 7.2, lt);
+          drawWatercolorCat(630, 390, 1.04, { t, coat: 'orange', tailMode: 'lash', ruffle: ruf, earSquish: 0.75 });
+          ctx.fillStyle = 'rgba(176, 72, 48, 0.85)';
+          ctx.font = '600 22px "PingFang SC", sans-serif';
+          ctx.fillText('逆毛炸毛 · 气呼呼甩尾巴 😾', 760, 250);
+        } else {
+          const g = ss(9.0, 10.2, lt) * (0.7 + 0.3 * Math.sin(lt * 7));
+          const ruf = 1 - ss(9.0, 11.8, lt);
+          drawWatercolorCat(640, 390, 1.04, { t, coat: 'orange', tailMode: 'relax', ruffle: ruf, groom: g });
+          ctx.fillStyle = 'rgba(122, 86, 56, 0.85)';
+          ctx.font = '600 22px "PingFang SC", sans-serif';
+          ctx.fillText('甩完尾巴消气啦，低头自己舔毛理顺… 👅', 450, 230);
+        }
+      } else if (t < 46) {
+        // Act 4: Walnut comb + furballs -> 360° laser chase!
+        const lt = t - 34;
+        if (lt < 6.0) {
+          const cx = 560 + Math.sin(lt * 2.2) * 140;
+          drawWatercolorCat(640, 385, 1.04, { t, coat: 'calico', tailMode: 'wag' });
+          drawComb(cx, 375);
+          // Bouncing fuzzy furballs
+          for (let i = 0; i < 3; i++) {
+            const appear = ss(1.0 + i * 1.3, 1.6 + i * 1.3, lt);
+            if (appear > 0.01) {
+              washBlob(520 + i * 115, 520 + Math.sin(t * 2 + i) * 5, 22 * appear, 20 * appear, 0, 'rgba(235,222,205,0.95)', 'rgba(235,222,205,0)');
+            }
+          }
+        } else {
+          const ct = lt - 6.0;
+          const orb = ct * 1.55;
+          const lx = 640 + Math.cos(orb) * 260;
+          const ly = 370 + Math.sin(orb) * 150;
+          const catAng = Math.atan2(370 - ly, 640 - lx);
+          drawWatercolorCat(640 + Math.cos(orb) * 35, 370 + Math.sin(orb) * 22, 0.96, {
+            t, coat: 'black', tailMode: 'wag', heading: catAng
+          });
+          // Glowing red laser dot
+          washBlob(lx, ly, 26, 26, 0, 'rgba(255, 62, 62, 0.65)', 'rgba(255, 62, 62, 0)');
+          ctx.fillStyle = '#ff3838';
+          ctx.beginPath(); ctx.arc(lx, ly, 7, 0, Math.PI * 2); ctx.fill();
+        }
+      } else if (t < 56) {
+        // Act 5: 13 breeds showcase + Polaroid snapshot flash!
+        const lt = t - 46;
+        const breeds = ['orange', 'black', 'calico', 'ragdoll', 'white'];
+        const bIdx = Math.min(breeds.length - 1, Math.floor(lt / 1.45));
+        drawWatercolorCat(600, 380, 1.02, { t, coat: breeds[bIdx], tailMode: 'wag' });
+
+        // Cute Polaroid card floating in at right
+        const cardA = ss(4.5, 5.6, lt);
+        if (cardA > 0.01) {
+          ctx.save();
+          ctx.globalAlpha = cardA;
+          ctx.translate(970, 355 - (1 - cardA) * 40);
+          ctx.rotate(0.06);
+          ctx.fillStyle = '#fff0f5';
+          ctx.shadowColor = 'rgba(80,50,60,0.22)';
+          ctx.shadowBlur = 24;
+          ctx.beginPath(); ctx.roundRect(-120, -145, 240, 290, 14); ctx.fill();
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = '#f5e7d5';
+          ctx.beginPath(); ctx.roundRect(-102, -125, 204, 178, 8); ctx.fill();
+          // Mini cat inside Polaroid
+          ctx.save();
+          ctx.beginPath(); ctx.roundRect(-102, -125, 204, 178, 8); ctx.clip();
+          drawWatercolorCat(0, -35, 0.36, { t, coat: 'calico', tailMode: 'relax' });
+          ctx.restore();
+          ctx.fillStyle = '#7c3f56';
+          ctx.font = '600 18px "PingFang SC", sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('樱花粉萌 · 拍立得留念 🌸', 0, 96);
+          ctx.restore();
+        }
+        // Shutter flash
+        const flash = Math.max(0, 1 - Math.abs(lt - 4.7) * 5);
+        if (flash > 0.01) {
+          ctx.fillStyle = `rgba(255,255,255,${flash * 0.7})`;
+          ctx.fillRect(0, 0, W, H);
+        }
+      } else {
+        // Act 6: Rain droplets -> Moonlight goodnight -> End card
+        drawWatercolorCat(640, 415, 1.02, { t, coat: 'orange', tailMode: 'relax' });
+        if (rainMix > 0.05) {
+          ctx.save();
+          ctx.strokeStyle = `rgba(90, 125, 165, ${rainMix * 0.35})`;
+          ctx.lineWidth = 2;
+          for (let i = 0; i < 36; i++) {
+            const rx = (i * 47 + t * 90) % W;
+            const ry = (i * 83 + t * 320) % H;
+            ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx - 8, ry + 26); ctx.stroke();
+          }
+          ctx.restore();
+        }
+        const endA = ss(60.5, 62.2, t);
+        if (endA > 0.01) {
+          ctx.save();
+          ctx.globalAlpha = endA;
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#e8f0fc';
+          ctx.font = '700 46px "PingFang SC", serif';
+          ctx.fillText('知喵撸猫馆', W / 2, 168);
+          ctx.font = '400 20px "PingFang SC", sans-serif';
+          ctx.fillStyle = '#a8bee0';
+          ctx.fillText('B站搜索关注 UP 主「知喵~」· 解锁 13 只猫咪与全套治愈玩法', W / 2, 214);
+          ctx.restore();
+        }
+      }
+
+      // Cold-press watercolor paper grain overlay
+      if (paperPat) {
+        ctx.fillStyle = paperPat;
+        ctx.fillRect(0, 0, W, H);
+      }
+
+      // Synced subtitle
+      const act = ACTS.find(a => t >= a.start && t < a.end) || ACTS[ACTS.length - 1];
+      const subAlpha = ss(act.start + 0.25, act.start + 0.7, t) * (1 - ss(act.end - 0.55, act.end - 0.1, t));
+      drawSubtitle(act.sub, subAlpha, nightMix > 0.5);
+    }
+
+    // UI Playback & Chapter Controls
+    const playBtn = document.getElementById('playBtn');
+    const scrub = document.getElementById('scrub');
+    const timeReadout = document.getElementById('timeReadout');
+    const chaptersEl = document.getElementById('chapters');
+
+    const chapBtns = ACTS.map((a) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chap';
+      b.innerHTML = `${a.title}<span>0:${String(a.start).padStart(2,'0')}–${a.end >= 60 ? '1:0' + (a.end - 60) : '0:' + String(a.end).padStart(2,'0')}</span>`;
+      b.onclick = () => { curT = a.start; scrub.value = curT; render(curT); syncUi(); };
+      chaptersEl.appendChild(b);
+      return b;
+    });
+
+    let playing = true;
+    let curT = 0;
+    let lastTs = performance.now();
+
+    function fmt(s) {
+      const m = Math.floor(s / 60);
+      const sec = Math.floor(s % 60);
+      return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+    }
+
+    function syncUi() {
+      scrub.value = curT.toFixed(2);
+      timeReadout.textContent = `${fmt(curT)} / 01:05`;
+      chapBtns.forEach((b, i) => {
+        const a = ACTS[i];
+        b.classList.toggle('active', curT >= a.start && (curT < a.end || (i === ACTS.length - 1 && curT >= a.start)));
+      });
+    }
+
+    playBtn.onclick = () => {
+      playing = !playing;
+      playBtn.textContent = playing ? '暂停 ⏸' : '播放 ▶';
+    };
+    scrub.oninput = () => {
+      curT = Number(scrub.value);
+      render(curT);
+      syncUi();
+    };
+
+    function tick(ts) {
+      const dt = Math.min(0.05, (ts - lastTs) / 1000);
+      lastTs = ts;
+      if (playing) {
+        curT += dt;
+        if (curT > DURATION) curT = 0;
+      }
+      render(curT);
+      syncUi();
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  </script>
+</body>
+</html>

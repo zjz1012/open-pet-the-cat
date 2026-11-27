@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>知喵撸猫馆 · 1分05秒温馨宣传片 — 3套 Lemo-Opuscar 网页预览设计稿</title>
+  <style>
+    :root {
+      --bg: #faf4ea;
+      --card: #fffdf9;
+      --ink: #352b23;
+      --muted: #7a6d60;
+      --accent: #c4743b;
+      --border: rgba(74, 58, 44, 0.14);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      background: radial-gradient(circle at 20% 0%, #fffaf0, var(--bg));
+      color: var(--ink);
+      font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", system-ui, sans-serif;
+      padding: 24px 18px 42px;
+    }
+    .container {
+      width: min(1220px, 100%);
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+    header {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .badge-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .badge {
+      font-size: 11.5px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: rgba(196, 116, 59, 0.14);
+      color: var(--accent);
+    }
+    h1 { margin: 0; font-size: 24px; font-weight: 700; }
+    header p { margin: 0; font-size: 13.5px; color: var(--muted); line-height: 1.6; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+    @media (max-width: 980px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .draft-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 16px 40px -24px rgba(56, 42, 28, 0.25);
+      transition: transform 0.18s ease, box-shadow 0.18s ease;
+    }
+    .draft-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 22px 46px -22px rgba(56, 42, 28, 0.34);
+    }
+    .preview-box {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #efe6d8;
+      overflow: hidden;
+      border-bottom: 1px solid var(--border);
+    }
+    .preview-box iframe {
+      position: absolute;
+      top: -66px;
+      left: -16px;
+      width: calc(100% + 32px);
+      height: calc(100% + 170px);
+      border: none;
+      pointer-events: none;
+      transform-origin: top center;
+    }
+    .draft-body {
+      padding: 15px 16px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      flex: 1;
+    }
+    .draft-tag {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: 0.02em;
+    }
+    .draft-title {
+      margin: 0;
+      font-size: 16.5px;
+      font-weight: 700;
+    }
+    .draft-desc {
+      margin: 0;
+      font-size: 12.5px;
+      color: var(--muted);
+      line-height: 1.55;
+      flex: 1;
+    }
+    .draft-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--ink);
+    }
+    .draft-meta span {
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #f4ece0;
+    }
+    .open-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 38px;
+      border-radius: 999px;
+      background: var(--ink);
+      color: #fff;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      margin-top: 4px;
+    }
+    .open-btn:hover { opacity: 0.9; }
+
+    .storyboard {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 18px 20px;
+    }
+    .storyboard h2 { margin: 0 0 12px; font-size: 16px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12.5px;
+    }
+    th, td {
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+    tr:last-child td { border-bottom: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="badge-row">
+        <span class="badge">Lemo-Opuscar 纯代码电影预览</span>
+        <span class="badge">总时长 01:05（65秒）</span>
+        <span class="badge">温馨治愈向 · 3套风格对比</span>
+      </div>
+      <h1>知喵撸猫馆 · 宣传视频 3 套网页版预览设计稿</h1>
+      <p>
+        以下 3 套均基于 <strong>Lemo-Opuscar 风格库</strong> 用纯 Canvas 代码实时渲染，包含完整的 65 秒六幕叙事、时间轴拖动、章节跳转与中文字幕预览。选定最喜欢的风格后，即可进入最终成片渲染（配音 + 原声配乐/真实猫呼噜混音 + 1080p MP4 + SRT 字幕导出）。
+      </p>
+    </header>
+
+    <section class="grid">
+      <article class="draft-card">
+        <div class="preview-box">
+          <iframe src="./draft-1-watercolor.html" title="方案1 水彩笔刷预览" loading="eager"></iframe>
+        </div>
+        <div class="draft-body">
+          <span class="draft-tag">方案 1 · watercolor（推荐 · 诗意 ASMR）</span>
+          <h2 class="draft-title">水彩笔刷 · 《窗边呼噜》</h2>
+          <p class="draft-desc">
+            冷压水彩纸纹叠加湿画法光影晕染：午后暖阳、耳边呼噜声波涟漪、雨天窗影与月光晚安无缝晕开，整体最贴近治愈系短片质感。
+          </p>
+          <div class="draft-meta">
+            <span>温润水彩</span><span>强光影氛围</span><span>适合 B站治愈区</span>
+          </div>
+          <a class="open-btn" href="./draft-1-watercolor.html">打开 65 秒完整交互预览 →</a>
+        </div>
+      </article>
+
+      <article class="draft-card">
+        <div class="preview-box">
+          <iframe src="./draft-2-paper-popup.html" title="方案2 纸片立体书预览" loading="eager"></iframe>
+        </div>
+        <div class="draft-body">
+          <span class="draft-tag">方案 2 · paper-popup（手工精致感）</span>
+          <h2 class="draft-title">纸片立体书 · 《会呼噜的猫猫手账》</h2>
+          <p class="draft-desc">
+            把撸猫馆做成一本在木桌上翻开的立体手工书：卡纸分层投影、胶带折页、弹出的木排梳/激光标签与 3 款扇形拍立得相纸，卖点展示最清晰。
+          </p>
+          <div class="draft-meta">
+            <span>立体手工感</span><span>玩法卖点清晰</span><span>呼应拍立得手账</span>
+          </div>
+          <a class="open-btn" href="./draft-2-paper-popup.html">打开 65 秒完整交互预览 →</a>
+        </div>
+      </article>
+
+      <article class="draft-card">
+        <div class="preview-box">
+          <iframe src="./draft-3-crayon-book.html" title="方案3 蜡笔儿童绘本预览" loading="eager"></iframe>
+        </div>
+        <div class="draft-body">
+          <span class="draft-tag">方案 3 · crayon-book（童话软萌向）</span>
+          <h2 class="draft-title">蜡笔绘本 · 《知喵的小太阳》</h2>
+          <p class="draft-desc">
+            油画棒粗糙笔触 + 经典 6fps 手绘微颤线条、腮红暖光、漂浮小爱心与晚安月牙，情绪共鸣最强、最显软萌亲切。
+          </p>
+          <div class="draft-meta">
+            <span>手绘微颤质感</span><span>极高亲和力</span><span>适合睡前治愈分享</span>
+          </div>
+          <a class="open-btn" href="./draft-3-crayon-book.html">打开 65 秒完整交互预览 →</a>
+        </div>
+      </article>
+    </section>
+
+    <section class="storyboard">
+      <h2>65 秒（01:05）通用六幕情绪与卖点结构</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>时间</th>
+            <th>幕次</th>
+            <th>画面与交互卖点</th>
+            <th>旁白 / 字幕情绪</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>0:00 – 0:10</td>
+            <td>01 窗边暖阳</td>
+            <td>窗帘微动、阳光斜洒在亚麻猫窝上，小橘猫呼吸起伏</td>
+            <td>疲惫片刻引入：“有一只暖呼呼的小猫正在窗边等你”</td>
+          </tr>
+          <tr>
+            <td>0:10 – 0:22</td>
+            <td>02 贴耳呼噜</td>
+            <td>轻抚猫背、耳朵微压回弹、呼噜声波温柔扩散</td>
+            <td>突出 20 层毛发手感与真实呼噜动态起伏</td>
+          </tr>
+          <tr>
+            <td>0:22 – 0:34</td>
+            <td>03 拍屁股与炸毛</td>
+            <td>拍屁股尾巴瞬间绷直 → 逆毛搓炸毛剧烈甩尾 → 低头舔毛恢复</td>
+            <td>展示真实猫咪脾气与生动反差萌</td>
+          </tr>
+          <tr>
+            <td>0:34 – 0:46</td>
+            <td>04 排梳与激光</td>
+            <td>木质排梳攒出可拨动的毛球 → 红点激光 360° 转圈追扑</td>
+            <td>趣味互动道具节奏略轻快</td>
+          </tr>
+          <tr>
+            <td>0:46 – 0:56</td>
+            <td>05 捏猫与拍立得</td>
+            <td>13 只猫切换 + 捏猫工坊 + 快门闪光定格樱花/胶片/贴纸拍立得</td>
+            <td>展示收藏、拍照保存与云存档延续</td>
+          </tr>
+          <tr>
+            <td>0:56 – 1:05</td>
+            <td>06 晴雨夜落版</td>
+            <td>晴日 → 雨天窗影 → 月光晚安，落版「知喵撸猫馆」与关注引导</td>
+            <td>温柔收束，引导 B站关注 UP 主「知喵~」免费解锁</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </div>
+</body>
+</html>

@@ -4,3 +4,4 @@ dist/
 *.log
 .vite/
 raw-assets/
+release/

@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>方案 2 · 纸片立体书 (Paper Pop-up Book) — 65秒温馨宣传片预览</title>
+  <style>
+    :root {
+      --bg: #efe7dc;
+      --card: #fffcf7;
+      --ink: #352b23;
+      --muted: #786a5c;
+      --accent: #b86c36;
+      --border: rgba(74, 58, 44, 0.14);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      background: linear-gradient(180deg, #f6efe4, var(--bg));
+      color: var(--ink);
+      font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 18px 16px 28px;
+    }
+    .wrap { width: min(1040px, 100%); display: flex; flex-direction: column; gap: 14px; }
+    .top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+    .title-group h1 { margin: 0; font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .pill { font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 999px; background: rgba(184, 108, 54, 0.15); color: var(--accent); }
+    .title-group p { margin: 3px 0 0; font-size: 12.5px; color: var(--muted); }
+    .nav-links { display: flex; gap: 6px; flex-wrap: wrap; }
+    .nav-btn { text-decoration: none; font-size: 12px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); color: var(--ink); }
+    .nav-btn:hover { background: #eadfce; }
+    .nav-btn.active { background: var(--ink); color: #fff; border-color: transparent; }
+
+    .player-shell {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border-radius: 18px;
+      overflow: hidden;
+      background: #e6dac8;
+      box-shadow: 0 22px 54px -24px rgba(56, 42, 28, 0.35);
+      border: 1px solid var(--border);
+    }
+    canvas#film { display: block; width: 100%; height: 100%; }
+    .controls {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .bar-row { display: flex; align-items: center; gap: 12px; }
+    .play-btn { height: 36px; padding: 0 16px; border-radius: 999px; border: none; background: var(--ink); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .time-readout { font-variant-numeric: tabular-nums; font-size: 12.5px; color: var(--muted); min-width: 92px; text-align: center; }
+    input[type="range"].scrub { flex: 1; accent-color: var(--accent); cursor: pointer; }
+    .chapters { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+    .chap { border: 1px solid var(--border); background: #faf5ec; color: var(--ink); border-radius: 10px; padding: 6px 8px; font-size: 11.5px; text-align: left; cursor: pointer; }
+    .chap.active { background: rgba(184, 108, 54, 0.15); border-color: var(--accent); color: #7a4218; font-weight: 600; }
+    .chap span { display: block; font-size: 10.5px; color: var(--muted); margin-top: 1px; }
+    @media (max-width: 720px) { .chapters { grid-template-columns: repeat(3, 1fr); } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="title-group">
+        <h1>方案 2 · 纸片立体书 <span class="pill">Lemo-Opuscar · paper-popup</span></h1>
+        <p>《翻开这本会呼噜的猫猫手账》· 手工分层卡纸 × 立体翻页折痕 × 可爱贴纸拍立得质感</p>
+      </div>
+      <nav class="nav-links">
+        <a class="nav-btn" href="./index.html">← 3套对比总览</a>
+        <a class="nav-btn" href="./draft-1-watercolor.html">方案1 水彩</a>
+        <a class="nav-btn active" href="./draft-2-paper-popup.html">方案2 立体书</a>
+        <a class="nav-btn" href="./draft-3-crayon-book.html">方案3 蜡笔绘本</a>
+      </nav>
+    </div>
+
+    <div class="player-shell">
+      <canvas id="film" width="1280" height="720"></canvas>
+    </div>
+
+    <div class="controls">
+      <div class="bar-row">
+        <button id="playBtn" class="play-btn" type="button">暂停 ⏸</button>
+        <input id="scrub" class="scrub" type="range" min="0" max="65" step="0.05" value="0" />
+        <div id="timeReadout" class="time-readout">00:00 / 01:05</div>
+      </div>
+      <div class="chapters" id="chapters"></div>
+    </div>
+  </div>
+
+  <script>
+    const DURATION = 65.0;
+    const ACTS = [
+      { id: 0, start: 0,  end: 10, title: '01 翻开手账', sub: '翻开这本会呼噜的猫猫立体书，一只晒着太阳的小橘猫正等你伸手。' },
+      { id: 1, start: 10, end: 22, title: '02 顺毛呼噜', sub: '指尖划过蓬松背脊，实时毛发微微起伏，温柔的呼噜声随之在耳畔响起。' },
+      { id: 2, start: 22, end: 34, title: '03 拍屁股与炸毛', sub: '轻拍圆屁股尾巴瞬间绷直；逆毛搓炸毛时气鼓鼓甩尾，接着低头舔毛理顺。' },
+      { id: 3, start: 34, end: 46, title: '04 排梳与红点', sub: '拉开纸页道具栏：木质排梳攒软萌毛球，红点激光笔逗它 360° 满垫追扑！' },
+      { id: 4, start: 46, end: 56, title: '05 捏猫拍立得', sub: '13 种猫咪与基因捏猫工坊，4 款可爱拍立得相纸定格留念，云端自动存档。' },
+      { id: 5, start: 56, end: 65, title: '06 晴雨夜落版', sub: '晴日、雨声白噪音、月光晚安——上 B站「知喵撸猫馆」，每天来摸亿把猫。' },
+    ];
+
+    const canvas = document.getElementById('film');
+    const ctx = canvas.getContext('2d');
+    const W = 1280, H = 720;
+
+    const clamp01 = v => Math.max(0, Math.min(1, v));
+    const ss = (a, b, x) => { const t = clamp01((x - a)/(b - a)); return t*t*(3 - 2*t); };
+
+    function paperShadow(blur = 18, oy = 10, alpha = 0.22) {
+      ctx.shadowColor = `rgba(54, 38, 22, ${alpha})`;
+      ctx.shadowBlur = blur;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = oy;
+    }
+    function noShadow() {
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+    }
+
+    function drawOpenBookSpread(t, isNight, isRain) {
+      // Wooden desk surface
+      ctx.fillStyle = isNight ? '#1b2333' : '#dfcfb9';
+      ctx.fillRect(0, 0, W, H);
+      // Desk wood planks
+      ctx.strokeStyle = isNight ? 'rgba(255,255,255,0.04)' : 'rgba(110,78,48,0.09)';
+      ctx.lineWidth = 2;
+      for (let y = 70; y < H; y += 90) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+      }
+
+      // Hardcover book base
+      paperShadow(34, 18, 0.34);
+      ctx.fillStyle = isNight ? '#283650' : '#a96840';
+      ctx.beginPath();
+      ctx.roundRect(76, 54, W - 152, H - 108, 20);
+      ctx.fill();
+      noShadow();
+
+      // Left & right cream cardstock pages
+      const pageCol = isNight ? '#213049' : isRain ? '#e8eff5' : '#fbf6eb';
+      const pageEdge = isNight ? '#182438' : '#e6dac5';
+      ctx.fillStyle = pageEdge;
+      ctx.beginPath(); ctx.roundRect(96, 68, W - 192, H - 136, 12); ctx.fill();
+
+      ctx.fillStyle = pageCol;
+      ctx.beginPath(); ctx.roundRect(104, 74, W - 208, H - 148, 10); ctx.fill();
+
+      // Center book gutter crease
+      const g = ctx.createLinearGradient(W/2 - 36, 0, W/2 + 36, 0);
+      g.addColorStop(0, 'rgba(0,0,0,0)');
+      g.addColorStop(0.5, 'rgba(60,40,20,0.16)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(W/2 - 36, 74, 72, H - 148);
+
+      // Decorative pastel washi tape on page corners
+      ctx.save();
+      ctx.translate(148, 92); ctx.rotate(-0.42);
+      ctx.fillStyle = 'rgba(154, 214, 194, 0.72)';
+      ctx.fillRect(-48, -12, 96, 24);
+      ctx.restore();
+
+      ctx.save();
+      ctx.translate(W - 148, 92); ctx.rotate(0.42);
+      ctx.fillStyle = 'rgba(255, 188, 158, 0.76)';
+      ctx.fillRect(-48, -12, 96, 24);
+      ctx.restore();
+
+      // Pop-up window sill tab at top-left of spread
+      const pop = ss(0.4, 1.5, t);
+      ctx.save();
+      ctx.translate(275, 195);
+      ctx.scale(1, Math.max(0.05, pop));
+      paperShadow(16, 10, 0.18);
+      ctx.fillStyle = isNight ? '#2e4163' : '#fffdf8';
+      ctx.beginPath(); ctx.roundRect(-125, -88, 250, 128, 12); ctx.fill();
+      noShadow();
+      ctx.fillStyle = isNight ? '#16243d' : isRain ? '#b7c9db' : '#fde8bd';
+      ctx.beginPath(); ctx.roundRect(-110, -74, 220, 100, 8); ctx.fill();
+      // Window mullions
+      ctx.strokeStyle = isNight ? '#465d85' : '#fffdf8';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.moveTo(0, -74); ctx.lineTo(0, 26);
+      ctx.moveTo(-110, -24); ctx.lineTo(110, -24);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawPaperCat(cx, cy, scale, opts) {
+      const { t, coat = 'orange', tailMode = 'relax', ruffle = 0, popScale = 1, heading = 0 } = opts;
+      const pals = {
+        orange: { body: '#e59a54', stripe: '#b96428', belly: '#fbe4c6', ear: '#e8b3a0' },
+        black:  { body: '#37343b', stripe: '#222026', belly: '#56525c', ear: '#6b5358' },
+        calico: { body: '#f7f1e7', stripe: '#dc853c', belly: '#2d2827', ear: '#e6b4a8' },
+        ragdoll:{ body: '#f5f0ea', stripe: '#998c82', belly: '#ded5cd', ear: '#dab8b0' },
+      };
+      const pal = pals[coat] || pals.orange;
+
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(heading);
+      ctx.scale(scale, scale * Math.max(0.05, popScale));
+
+      const breath = 1 + 0.025 * Math.sin(t * 2.2);
+
+      // Layer 1: Layered cardstock linen cushion
+      paperShadow(22, 14, 0.22);
+      ctx.fillStyle = '#e8dcc8';
+      ctx.beginPath(); ctx.roundRect(-245, -125, 490, 250, 68); ctx.fill();
+      noShadow();
+      ctx.strokeStyle = '#d3c2a6';
+      ctx.lineWidth = 4;
+      ctx.setLineDash([10, 8]);
+      ctx.beginPath(); ctx.roundRect(-228, -110, 456, 220, 56); ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Layer 2: Cut-paper tail
+      paperShadow(14, 8, 0.20);
+      ctx.strokeStyle = pal.body;
+      ctx.lineCap = 'round';
+      ctx.lineWidth = 30 + ruffle * 10;
+      let tx2 = 225, ty2 = 24, tx3 = 195, ty3 = 96;
+      if (tailMode === 'stiff') {
+        tx2 = 235; ty2 = -14; tx3 = 315; ty3 = -26 + Math.sin(t * 24) * 3;
+      } else if (tailMode === 'lash') {
+        const s = Math.sin(t * 13) * 85;
+        tx2 = 225; ty2 = s * 0.55; tx3 = 290; ty3 = s;
+      } else {
+        const s = Math.sin(t * 1.9) * (tailMode === 'wag' ? 20 : 8);
+        ty2 += s * 0.6; ty3 += s;
+      }
+      ctx.beginPath();
+      ctx.moveTo(132, -4);
+      ctx.quadraticCurveTo(tx2, ty2, tx3, ty3);
+      ctx.stroke();
+      noShadow();
+
+      // Layer 3: Layered paper cat torso
+      ctx.save();
+      ctx.scale(1, breath);
+      paperShadow(20, 12, 0.24);
+      ctx.fillStyle = pal.body;
+      ctx.beginPath(); ctx.ellipse(10, 0, 150, 72, 0, 0, Math.PI * 2); ctx.fill();
+      noShadow();
+      // White paper cut-edge rim highlight
+      ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      // Cutout stripes / patches
+      ctx.save();
+      ctx.beginPath(); ctx.ellipse(10, 0, 148, 70, 0, 0, Math.PI * 2); ctx.clip();
+      if (coat === 'orange') {
+        ctx.fillStyle = pal.stripe;
+        for (let i = -3; i <= 3; i++) {
+          ctx.beginPath();
+          ctx.roundRect(i * 38, -75, 16, 150, 8);
+          ctx.fill();
+        }
+      } else if (coat === 'calico') {
+        ctx.fillStyle = pal.stripe;
+        ctx.beginPath(); ctx.arc(58, -22, 54, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = pal.belly;
+        ctx.beginPath(); ctx.arc(-20, 26, 48, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+      ctx.restore();
+
+      // Layer 4: Pop-up folded cat head + layered ears
+      ctx.save();
+      ctx.translate(-132, 0);
+      paperShadow(16, 10, 0.24);
+      // Left & right rounded paper ears
+      const drawEar = (ex, ey, rot) => {
+        ctx.save();
+        ctx.translate(ex, ey);
+        ctx.rotate(rot);
+        ctx.fillStyle = pal.body;
+        ctx.beginPath();
+        ctx.moveTo(-20, 6); ctx.quadraticCurveTo(-16, -34, 0, -40); ctx.quadraticCurveTo(16, -34, 20, 6);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = pal.ear;
+        ctx.beginPath();
+        ctx.moveTo(-10, -4); ctx.quadraticCurveTo(-8, -24, 0, -28); ctx.quadraticCurveTo(8, -24, 10, -4);
+        ctx.closePath(); ctx.fill();
+        ctx.restore();
+      };
+      drawEar(4, -40, -0.5);
+      drawEar(-6, 40, -2.55);
+
+      ctx.fillStyle = pal.body;
+      ctx.beginPath(); ctx.ellipse(-4, 0, 58, 52, 0, 0, Math.PI * 2); ctx.fill();
+      noShadow();
+      ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.restore();
+    }
+
+    function drawTagBadge(x, y, text, bg = '#fff7e6') {
+      ctx.save();
+      paperShadow(14, 8, 0.18);
+      ctx.font = '600 20px "PingFang SC", sans-serif';
+      const w = ctx.measureText(text).width + 36;
+      ctx.fillStyle = bg;
+      ctx.beginPath(); ctx.roundRect(x - w/2, y - 22, w, 44, 22); ctx.fill();
+      noShadow();
+      ctx.strokeStyle = 'rgba(130, 96, 62, 0.25)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = '#473628';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, x, y + 1);
+      ctx.restore();
+    }
+
+    function drawSubtitle(text, alpha, isNight) {
+      if (!text || alpha < 0.02) return;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.font = '500 24px "PingFang SC", sans-serif';
+      const tw = ctx.measureText(text).width;
+      const bw = Math.min(W - 180, tw + 48);
+      const bx = (W - bw) / 2;
+      const by = H - 78;
+      paperShadow(14, 6, 0.22);
+      ctx.fillStyle = isNight ? '#1b2840' : '#fffdf8';
+      ctx.beginPath(); ctx.roundRect(bx, by, bw, 46, 23); ctx.fill();
+      noShadow();
+      ctx.fillStyle = isNight ? '#e4eeff' : '#3a2f26';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, W / 2, by + 24, bw - 28);
+      ctx.restore();
+    }
+
+    function render(t) {
+      const isRain = t >= 56.5 && t < 60.0;
+      const isNight = t >= 60.0;
+
+      drawOpenBookSpread(t, isNight, isRain);
+
+      if (t < 10) {
+        const pop = ss(0.8, 2.2, t);
+        drawPaperCat(650, 395, 1.0, { t, coat: 'orange', popScale: pop });
+        const titlePop = ss(1.6, 2.6, t) * (1 - ss(8.5, 9.6, t));
+        if (titlePop > 0.01) {
+          ctx.save(); ctx.globalAlpha = titlePop;
+          drawTagBadge(860, 175, '📖 知喵撸猫馆 · 立体书预览', '#fff7e8');
+          ctx.restore();
+        }
+      } else if (t < 22) {
+        const lt = t - 10;
+        drawPaperCat(650, 395, 1.02, { t, coat: 'orange', tailMode: 'wag' });
+        const hx = 630 + Math.sin(lt * 1.5) * 120;
+        drawTagBadge(hx, 235, '🤚 轻抚背脊 · 贴耳呼噜 ASMR', '#fff3df');
+      } else if (t < 34) {
+        const lt = t - 22;
+        if (lt < 5.5) {
+          drawPaperCat(620, 395, 1.0, { t, coat: 'orange', tailMode: 'stiff' });
+          drawTagBadge(860, 225, '🐾 拍猫屁股 · 尾巴绷直！', '#ffeede');
+        } else {
+          drawPaperCat(640, 395, 1.0, { t, coat: 'orange', tailMode: lt < 9 ? 'lash' : 'relax', ruffle: lt < 9 ? 0.9 : 0.2 });
+          drawTagBadge(820, 225, lt < 9 ? '😾 逆毛炸毛 · 剧烈甩尾' : '👅 甩尾消气 · 低头舔毛', '#ffeceb');
+        }
+      } else if (t < 46) {
+        const lt = t - 34;
+        if (lt < 6) {
+          drawPaperCat(640, 395, 1.0, { t, coat: 'calico', tailMode: 'wag' });
+          drawTagBadge(820, 200, '🪮 木质排梳 · 攒软萌毛球', '#fff6e4');
+        } else {
+          const orb = (lt - 6) * 1.6;
+          const lx = 640 + Math.cos(orb) * 230;
+          const ly = 390 + Math.sin(orb) * 120;
+          drawPaperCat(640, 395, 0.92, { t, coat: 'black', tailMode: 'wag', heading: Math.atan2(395 - ly, 640 - lx) });
+          ctx.fillStyle = '#ff3b3b';
+          ctx.beginPath(); ctx.arc(lx, ly, 9, 0, Math.PI * 2); ctx.fill();
+          drawTagBadge(860, 180, '🔴 红点激光 · 360° 追捕', '#ffecec');
+        }
+      } else if (t < 56) {
+        const lt = t - 46;
+        const coats = ['orange', 'black', 'calico', 'ragdoll'];
+        drawPaperCat(530, 395, 0.88, { t, coat: coats[Math.floor(lt / 2) % coats.length], tailMode: 'wag' });
+        // Fan of 3 cute Polaroid styles popping out of the right page!
+        const styles = [
+          { name: '樱花粉萌', bg: '#fff0f5', rot: -0.08, x: 930, y: 315 },
+          { name: '复古胶片', bg: '#24201d', rot: 0.02,  x: 975, y: 355, dark: true },
+          { name: '手账贴纸', bg: '#fff9e6', rot: 0.10,  x: 1015, y: 395 },
+        ];
+        styles.forEach((s, i) => {
+          const p = ss(1.0 + i * 1.1, 2.0 + i * 1.1, lt);
+          if (p > 0.01) {
+            ctx.save();
+            ctx.translate(s.x, s.y + (1 - p) * 60);
+            ctx.rotate(s.rot);
+            ctx.globalAlpha = p;
+            paperShadow(18, 10, 0.25);
+            ctx.fillStyle = s.bg;
+            ctx.beginPath(); ctx.roundRect(-86, -102, 172, 204, 10); ctx.fill();
+            noShadow();
+            ctx.fillStyle = s.dark ? '#38322c' : '#eadbc6';
+            ctx.beginPath(); ctx.roundRect(-72, -88, 144, 126, 6); ctx.fill();
+            ctx.fillStyle = s.dark ? '#f0dfc4' : '#573f32';
+            ctx.font = '600 15px "PingFang SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(s.name + ' 📸', 0, 74);
+            ctx.restore();
+          }
+        });
+      } else {
+        drawPaperCat(640, 410, 0.96, { t, coat: 'orange', tailMode: 'relax' });
+        if (isRain) {
+          ctx.strokeStyle = 'rgba(78, 118, 160, 0.4)';
+          ctx.lineWidth = 2;
+          for (let i = 0; i < 24; i++) {
+            const rx = 180 + (i * 42 + t * 80) % 920;
+            const ry = 100 + (i * 57 + t * 240) % 480;
+            ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx - 6, ry + 20); ctx.stroke();
+          }
+        }
+        if (t > 60.2) {
+          drawTagBadge(640, 175, '🌙 知喵撸猫馆 · B站关注「知喵~」免费解锁全猫种', '#243554');
+        }
+      }
+
+      const act = ACTS.find(a => t >= a.start && t < a.end) || ACTS[ACTS.length - 1];
+      const subAlpha = ss(act.start + 0.25, act.start + 0.7, t) * (1 - ss(act.end - 0.55, act.end - 0.1, t));
+      drawSubtitle(act.sub, subAlpha, isNight);
+    }
+
+    const playBtn = document.getElementById('playBtn');
+    const scrub = document.getElementById('scrub');
+    const timeReadout = document.getElementById('timeReadout');
+    const chaptersEl = document.getElementById('chapters');
+
+    const chapBtns = ACTS.map((a) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'chap';
+      b.innerHTML = `${a.title}<span>0:${String(a.start).padStart(2,'0')}–${a.end >= 60 ? '1:0' + (a.end - 60) : '0:' + String(a.end).padStart(2,'0')}</span>`;
+      b.onclick = () => { curT = a.start; scrub.value = curT; render(curT); syncUi(); };
+      chaptersEl.appendChild(b);
+      return b;
+    });
+
+    let playing = true, curT = 0, lastTs = performance.now();
+    const fmt = s => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+    function syncUi() {
+      scrub.value = curT.toFixed(2);
+      timeReadout.textContent = `${fmt(curT)} / 01:05`;
+      chapBtns.forEach((b, i) => {
+        const a = ACTS[i];
+        b.classList.toggle('active', curT >= a.start && (curT < a.end || (i === ACTS.length - 1 && curT >= a.start)));
+      });
+    }
+    playBtn.onclick = () => { playing = !playing; playBtn.textContent = playing ? '暂停 ⏸' : '播放 ▶'; };
+    scrub.oninput = () => { curT = Number(scrub.value); render(curT); syncUi(); };
+    function tick(ts) {
+      const dt = Math.min(0.05, (ts - lastTs) / 1000); lastTs = ts;
+      if (playing) { curT += dt; if (curT > DURATION) curT = 0; }
+      render(curT); syncUi(); requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  </script>
+</body>
+</html>
