@@ -36,8 +36,8 @@ export class CatRenderer {
   private readonly sceneProgram: WebGLProgram;
   private readonly emptyVao: WebGLVertexArrayObject;
 
-  private readonly simWidth = 256;
-  private readonly simHeight = 160;
+  private readonly simWidth = 512;
+  private readonly simHeight = 320;
   private simBuffers: [SimFBO, SimFBO];
   private simIndex = 0;
 

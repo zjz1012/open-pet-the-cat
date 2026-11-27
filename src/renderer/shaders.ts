@@ -53,8 +53,8 @@ void main() {
 
   float indent = mix(prev.r, avg.r, min(0.32, uDt * 12.0));
   float vel = (prev.g - 0.5) * 2.0;
-  // Comb grooves hold their crisp track longer with less diffusion!
-  float flowDiff = uToolMode == 1 ? min(0.06, uDt * 2.0) : min(0.18, uDt * 4.0);
+  // Preserve razor-sharp parallel comb tracks with minimal diffusion!
+  float flowDiff = uToolMode == 1 ? min(0.015, uDt * 0.8) : min(0.16, uDt * 3.5);
   vec2 flow = mix(prev.ba, avg.ba, flowDiff) * 2.0 - 1.0;
 
   // Hand or Wooden Pet Comb contact imprint
@@ -63,7 +63,8 @@ void main() {
   vec2 hp = rot2d(d, -uHandAngle) / max(0.75, 0.85 + 0.15 * uCatSize);
 
   float contact = 0.0;
-  float combToothWave = 0.0;
+  float combParting = 0.0;
+  float combGrooveVal = 0.0;
   if (uHandVisible > 0.01 && uHandPress > 0.01 && (uToolMode == 0 || uToolMode == 1)) {
     if (uToolMode == 0) {
       // 4 soft fingertips + gentle palm heel pad
@@ -74,11 +75,17 @@ void main() {
       float palm = exp(-dot((hp - vec2(0.002, 0.022)) / vec2(0.068, 0.058), (hp - vec2(0.002, 0.022)) / vec2(0.068, 0.058))) * 0.72;
       contact = clamp(max(max(max(f1, f2), max(f3, f4)), palm) * uHandPress * uHandVisible, 0.0, 1.0);
     } else {
-      // Wooden Pet Comb: crisp 9-tooth horizontal comb head leaving parallel fur grooves!
-      float headMask = exp(-pow(hp.y / 0.026, 2.0)) * smoothstep(0.088, 0.068, abs(hp.x));
-      float teeth = 0.5 + 0.5 * cos(hp.x * 360.0);
-      combToothWave = sin(hp.x * 360.0) * headMask * uHandPress;
-      contact = clamp(headMask * (0.45 + 0.55 * teeth) * uHandPress * uHandVisible, 0.0, 1.0);
+      // Wooden Pet Comb aligned along the cat's spine:
+      // 7 crisp vertical comb teeth spanning Y in [-0.105, +0.105] carving sleek horizontal tracks along X!
+      float toothZoneX = exp(-pow((hp.x + 0.012) / 0.022, 2.0));
+      float toothZoneY = smoothstep(0.112, 0.095, abs(hp.y));
+      float headMask = toothZoneX * toothZoneY;
+      // Pitch 0.030 UV -> ~10 texels per tooth at 512x320 (zero aliasing, crisp silky grooves!)
+      float toothPhase = hp.y * (6.2831853 / 0.030);
+      float toothTrough = pow(0.5 + 0.5 * cos(toothPhase), 1.6);
+      combParting = sin(toothPhase) * headMask * uHandPress;
+      combGrooveVal = toothTrough * headMask * uHandPress * uHandVisible;
+      contact = clamp(headMask * (0.28 + 0.72 * toothTrough) * uHandPress * uHandVisible, 0.0, 1.0);
     }
   }
 
@@ -92,25 +99,30 @@ void main() {
     contact = max(contact, exp(-r * r / 0.008) * uPatImpulse * 0.92);
   }
 
-  // Spring-damper bounce (slightly bouncier during bongo pat!)
+  // Spring-damper bounce
   float springAccel = (contact - indent) * 52.0 - vel * 12.5;
   vel += springAccel * uDt;
   indent = clamp(indent + vel * uDt, 0.0, 1.0);
   if (contact < 0.01 && uPatImpulse < 0.01) {
-    indent *= exp(-uDt * 4.5);
+    indent *= exp(-uDt * (uToolMode == 1 ? 2.6 : 4.5));
   }
 
   // Fur combing vector
-  float combMask = smoothstep(0.06, 0.45, contact);
+  float combMask = smoothstep(0.05, 0.38, contact);
   vec2 strokeVec = vec2(uHandVel.x * uAspect, uHandVel.y);
   float strokeMag = length(strokeVec);
-  if (combMask > 0.001 && strokeMag > 0.012) {
+  if (uToolMode == 1 && combMask > 0.001) {
+    // Even slow gentle combing leaves crisp sleek parallel tracks aligned with stroke (default +X along fur)!
+    vec2 strokeDir = strokeMag > 0.015 ? strokeVec / strokeMag : vec2(1.0, 0.0);
+    float strength = clamp(0.45 + strokeMag * 1.1, 0.45, 1.0) * combMask;
+    // Flow X follows stroke sleekly; Flow Y parts fur symmetrically away from each comb tooth trough!
+    vec2 targetFlow = strokeDir * (0.72 + 0.25 * combGrooveVal) + vec2(0.0, combParting * 0.95);
+    flow = mix(flow, targetFlow, min(1.0, uDt * 34.0 * strength));
+  } else if (combMask > 0.001 && strokeMag > 0.012) {
     vec2 strokeDir = strokeVec / (strokeMag + 0.0001);
-    vec2 strokePerp = vec2(-strokeDir.y, strokeDir.x);
     float strength = min(1.0, strokeMag * 0.95) * combMask;
-    // Comb leaves crisp alternating tooth parting ridges perpendicular to the stroke!
-    vec2 targetFlow = strokeDir * min(1.0, 0.60 + strokeMag * 0.55) + strokePerp * combToothWave * 0.72;
-    flow = mix(flow, targetFlow, min(1.0, uDt * (uToolMode == 1 ? 26.0 : 18.0) * strength));
+    vec2 targetFlow = strokeDir * min(1.0, 0.60 + strokeMag * 0.55);
+    flow = mix(flow, targetFlow, min(1.0, uDt * 18.0 * strength));
   }
   if (uToolMode == 0 && contact > 0.18) {
     vec2 radial = normalize(hp + vec2(0.0001));
@@ -118,8 +130,8 @@ void main() {
     flow = mix(flow, flow + worldRadial * 0.16, min(1.0, uDt * 2.8 * contact));
   }
 
-  // Combed tracks linger gracefully longer than hand strokes
-  float relaxRate = uToolMode == 1 ? 0.22 : 0.46;
+  // Combed silk tracks linger visibly for ~7 seconds so you can admire your groomed cat!
+  float relaxRate = uToolMode == 1 ? 0.13 : 0.44;
   flow *= exp(-uDt * relaxRate);
   float flowLen = length(flow);
   if (flowLen > 1.0) flow /= flowLen;
@@ -578,50 +590,60 @@ vec3 applyAtmosphere(vec3 col, float windowBeam, float rainDrop) {
   return res;
 }
 
-// ---------- Procedural Shaded Walnut Wooden Pet Comb ----------
+// ---------- Procedural Shaded Japanese Walnut Grooming Comb (Aligned Along Cat's Spine!) ----------
 
 vec4 evalWoodenComb(vec2 uv, out float shadowAlpha) {
   shadowAlpha = 0.0;
   vec2 d = uv - uHandPos;
   d.x *= uAspect;
-  vec2 p = rot2d(d, -uHandAngle) / max(0.80, 0.88 + 0.12 * uCatSize);
+  float pressScale = 1.0 - uHandPress * 0.045;
+  vec2 p = rot2d(d, -uHandAngle) / (max(0.82, 0.90 + 0.10 * uCatSize) * pressScale);
 
-  // Soft cast shadow offset
-  vec2 shOff = vec2(0.018, 0.022) * (1.15 - uHandPress * 0.65);
+  // Soft cast shadow beneath comb & teeth
+  vec2 shOff = vec2(0.014, 0.018) * (1.15 - uHandPress * 0.70);
   vec2 ds = uv - (uHandPos + shOff);
   ds.x *= uAspect;
-  vec2 ps = rot2d(ds, -uHandAngle) / max(0.80, 0.88 + 0.12 * uCatSize);
-  float sSpine = sdRoundedBox(ps - vec2(0.0, 0.028), vec2(0.095, 0.018), 0.012);
-  float sHandle = sdRoundedBox(ps - vec2(0.0, 0.11), vec2(0.020, 0.088), 0.014);
-  float sTeethBox = sdRoundedBox(ps - vec2(0.0, -0.014), vec2(0.086, 0.032), 0.005);
-  float sDist = min(min(sSpine, sHandle), sTeethBox);
-  shadowAlpha = smoothstep(0.016, -0.004, sDist) * mix(0.24, 0.42, uHandPress);
+  vec2 ps = rot2d(ds, -uHandAngle) / (max(0.82, 0.90 + 0.10 * uCatSize) * pressScale);
+  // Comb spine runs vertically (along Y) across the cat's back, teeth extend leftward (-X) into fur!
+  float sSpine = sdRoundedBox(ps - vec2(0.022, 0.0), vec2(0.020, 0.118), 0.016);
+  float sTeethBox = sdRoundedBox(ps - vec2(-0.016, 0.0), vec2(0.028, 0.104), 0.006);
+  float sDist = min(sSpine, sTeethBox);
+  shadowAlpha = smoothstep(0.015, -0.004, sDist) * mix(0.24, 0.44, uHandPress);
 
-  // Comb teeth (11 fine rounded pins extending upward from wooden spine)
-  float toothPitch = 0.0155;
-  float tx = p.x - clamp(round(p.x / toothPitch), -5.0, 5.0) * toothPitch;
-  float dTeeth = sdRoundedBox(vec2(tx, p.y + 0.014), vec2(0.0028, 0.034), 0.0024);
+  // 8 finely spaced vertical bamboo/brass comb teeth extending leftward (-X) to sweep smoothly along cat's back!
+  float toothPitch = 0.028;
+  float ty = p.y - clamp(round(p.y / toothPitch), -3.5, 3.5) * toothPitch;
+  // Slightly tapered rounded comb pins
+  float pinHalfW = mix(0.0024, 0.0036, smoothstep(-0.045, 0.008, p.x));
+  float dTeeth = sdRoundedBox(vec2(p.x + 0.018, ty), vec2(0.032, pinHalfW), 0.0022);
+  // Clamp teeth strictly within comb spine span
+  dTeeth = max(dTeeth, abs(p.y) - 0.104);
 
-  // Walnut wooden comb spine & ergonomic handle
-  float dSpine = sdRoundedBox(p - vec2(0.0, 0.028), vec2(0.096, 0.018), 0.013);
-  float dHandle = sdRoundedBox(p - vec2(0.0, 0.115), vec2(0.021, 0.092), 0.015);
-  float dWood = smin(dSpine, dHandle, 0.014);
+  // Ergonomic curved walnut wooden comb back (wider comfortable grip on right side +X)
+  vec2 spineP = p - vec2(0.026, 0.0);
+  spineP.x -= 0.006 * cos(clamp(p.y / 0.118, -1.0, 1.0) * 1.5707);
+  float dWood = sdRoundedBox(spineP, vec2(0.022, 0.120), 0.018);
 
-  float woodA = smoothstep(0.0025, -0.0025, dWood);
-  float teethA = smoothstep(0.002, -0.002, dTeeth) * (1.0 - woodA);
+  float woodA = smoothstep(0.0022, -0.0022, dWood);
+  float teethA = smoothstep(0.0018, -0.0018, dTeeth) * (1.0 - woodA);
 
   if (woodA < 0.005 && teethA < 0.005) return vec4(0.0);
 
-  // Rich warm walnut wood grain
-  float grain = sin(p.y * 120.0 + fbm2(p * 18.0) * 7.0) * 0.5 + 0.5;
-  float woodShade = 0.72 + 0.34 * smoothstep(0.025, -0.02, p.x + p.y * 0.35);
-  vec3 woodCol = mix(vec3(0.36, 0.22, 0.13), vec3(0.54, 0.35, 0.21), grain * 0.65 + 0.2) * woodShade;
-  // Subtle polished wood highlight
-  woodCol += vec3(0.18, 0.13, 0.09) * exp(-pow((p.x + 0.006) / 0.014, 2.0)) * smoothstep(0.01, 0.05, p.y);
+  // Rich polished Japanese walnut grain + 3D cylindrical bevel shading
+  float grain = sin(p.x * 160.0 + fbm2(p * 14.0) * 6.0) * 0.5 + 0.5;
+  float bevel = smoothstep(0.048, 0.006, p.x);
+  float topLight = 0.72 + 0.34 * bevel - p.y * 0.45;
+  vec3 woodCol = mix(vec3(0.32, 0.19, 0.11), vec3(0.56, 0.36, 0.21), grain * 0.60 + 0.22) * topLight;
+  // Warm satin wood specular ridge along left-top curve
+  woodCol += vec3(0.22, 0.16, 0.10) * exp(-pow((p.x - 0.018) / 0.008, 2.0)) * smoothstep(0.115, 0.02, abs(p.y));
+  // Subtle recessed brass ferrule groove where teeth join wood
+  float seam = exp(-pow((p.x - 0.005) / 0.0035, 2.0));
+  woodCol *= 1.0 - seam * 0.28;
 
-  // Warm brushed brass / ivory pins
-  float pinLight = 0.76 + 0.28 * (1.0 - abs(tx) / 0.003);
-  vec3 teethCol = vec3(0.84, 0.77, 0.66) * pinLight;
+  // Brushed stainless/ivory-tipped grooming pins catching warm specular glints
+  float pinCyl = sqrt(max(0.0, 1.0 - clamp((ty * ty) / (pinHalfW * pinHalfW + 1e-6), 0.0, 1.0)));
+  float tipShade = smoothstep(-0.052, -0.012, p.x);
+  vec3 teethCol = mix(vec3(0.68, 0.62, 0.54), vec3(0.95, 0.90, 0.82), pinCyl * (0.45 + 0.55 * tipShade));
 
   vec3 col = woodCol * woodA + teethCol * teethA;
   float a = clamp(woodA + teethA, 0.0, 1.0);
@@ -707,13 +729,23 @@ void main() {
     float indT = texture(uSimTex, uv - vec2(0.0, epsUv.y)).r;
     vec2 indentGrad = vec2(indR - indL, indB - indT) * 14.0;
 
+    // Detect combed fur tooth parting troughs vs. raised silky fur ridges via Y-divergence of comb flow!
+    float combYTop = texture(uSimTex, uv - vec2(0.0, 0.005)).a * 2.0 - 1.0;
+    float combYBot = texture(uSimTex, uv + vec2(0.0, 0.005)).a * 2.0 - 1.0;
+    float combPartDiv = clamp((combYBot - combYTop) * 1.45, -1.0, 1.0); // >0 = tooth parting trough, <0 = raised sleek ridge!
+    float combRidgeSlope = clamp(comb.y * 1.35, -1.0, 1.0);
+
     float eps = 0.006;
     float hR = evalCat(catP + vec2(eps, 0.0)).height;
     float hL = evalCat(catP - vec2(eps, 0.0)).height;
     float hB = evalCat(catP + vec2(0.0, eps)).height;
     float hT = evalCat(catP - vec2(0.0, eps)).height;
     vec2 bodyGrad = vec2(hR - hL, hB - hT) / (2.0 * eps);
-    vec3 surfNormal = normalize(vec3(-bodyGrad.x * 0.38 + indentGrad.x, -bodyGrad.y * 0.38 + indentGrad.y, 1.0));
+    vec3 surfNormal = normalize(vec3(
+      -bodyGrad.x * 0.38 + indentGrad.x,
+      -bodyGrad.y * 0.38 + indentGrad.y - combRidgeSlope * 0.42,
+      1.0
+    ));
 
     vec3 lightDir = normalize(vec3(-0.56, -0.48, 0.68));
     vec3 viewDir = vec3(0.0, 0.0, 1.0);
@@ -759,11 +791,13 @@ void main() {
 
       vec2 baseFlow = gHere.flow;
       vec2 combLocal = vec2(comb.x, comb.y);
-      vec2 effDir = normalize(baseFlow + combLocal * 1.65 + vec2(1e-4, 0.0));
+      vec2 effDir = normalize(baseFlow + combLocal * 1.95 + vec2(1e-4, 0.0));
       float againstGrain = clamp(-dot(baseFlow, combLocal), 0.0, 1.0);
       float combAmount = length(combLocal);
-      // Silky gloss boost when freshly groomed with the wooden comb!
-      float groomedSheenBoost = uToolMode == 1 ? combAmount * 0.38 : combAmount * 0.12;
+      // Distinct silky brushed gloss on combed ridge crests & deeper parting in tooth troughs!
+      float ridgeCrest = max(0.0, -combPartDiv);
+      float toothTrough = max(0.0, combPartDiv);
+      float groomedSheenBoost = combAmount * (0.28 + ridgeCrest * 0.72);
 
       vec3 accumCol = vec3(0.0);
       float accumAlpha = 0.0;
@@ -776,7 +810,7 @@ void main() {
         float overhang = h * (0.012 + localLen * 0.036);
         vec2 pLayer = catP
           - effDir * overhang
-          - combLocal * (h * 0.015 * (0.6 + 0.6 * localLen))
+          - combLocal * (h * 0.022 * (0.65 + 0.65 * localLen))
           + vec2(surfNormal.x, surfNormal.y) * (h * 0.008);
 
         CatGeom gLayer = evalCat(pLayer);
@@ -790,7 +824,9 @@ void main() {
         if (i == 0) {
           layerAlpha = bodyCov;
         } else {
-          float threshold = h * (0.76 - againstGrain * 0.10);
+          // Part outer fur layers slightly open in comb tooth troughs so real parting grooves appear!
+          float troughParting = toothTrough * h * 0.28;
+          float threshold = h * (0.76 - againstGrain * 0.10) + troughParting;
           float strand = smoothstep(threshold, threshold + 0.24, fiber);
           float edgeSoft = mix(0.62, 1.0, smoothstep(0.006, -0.025, gLayer.sdf));
           layerAlpha = strand * bodyCov * edgeSoft * (0.34 + 0.28 * (1.0 - h));
@@ -800,7 +836,7 @@ void main() {
 
         vec3 coat = evalCoatColor(pLayer, gLayer);
         float rootAO = mix(0.36, 1.06, pow(h, 0.62));
-        float pressAO = 1.0 - indent * mix(0.46, 0.22, h);
+        float pressAO = 1.0 - indent * mix(0.46, 0.22, h) - toothTrough * mix(0.32, 0.14, h);
         float bellyAO = 0.70 + 0.30 * smoothstep(0.0, 0.36, gLayer.height);
 
         vec3 tuftN = normalize(surfNormal + vec3((fiber - 0.5) * 0.45 * effDir, 0.0));
@@ -812,14 +848,14 @@ void main() {
         float sinTH = sqrt(max(0.0, 1.0 - tdh * tdh));
         float coatLum = dot(coat, vec3(0.299, 0.587, 0.114));
         float sheenScale = mix(0.45, 1.0, smoothstep(0.04, 0.35, coatLum));
-        float sheenSpec = pow(sinTH, 18.0) * (uSheen + groomedSheenBoost) * sheenScale * (0.10 + 0.18 * h) * (0.35 + 0.65 * wrapDiff);
+        float sheenSpec = pow(sinTH, 16.0) * (uSheen + groomedSheenBoost) * sheenScale * (0.11 + 0.22 * h) * (0.35 + 0.65 * wrapDiff);
         float rim = pow(1.0 - max(0.0, tuftN.z), 2.8) * h * 0.12 * smoothstep(0.008, -0.015, gLayer.sdf);
 
         vec3 bounce = mix(vec3(0.12, 0.095, 0.07), vec3(0.035, 0.055, 0.10), max(uNight, uRain * 0.45)) * (1.0 - wrapDiff) * (0.5 + 0.5 * h);
         float catBeam = evalWindowLight(uv, (gLayer.height - indent * 0.28) * 0.52);
         float catRain = evalRainShadows(uv, (gLayer.height - indent * 0.28) * 0.52);
 
-        vec3 litFur = coat * (0.32 + 0.76 * wrapDiff) * rootAO * pressAO * bellyAO
+        vec3 litFur = coat * (0.32 + 0.76 * wrapDiff + ridgeCrest * h * 0.12) * rootAO * pressAO * bellyAO
           + mix(vec3(1.0, 0.96, 0.90), vec3(0.75, 0.86, 1.0), max(uNight, uRain * 0.5)) * (sheenSpec + rim * (0.35 + 0.65 * catBeam))
           + coat * bounce;
 

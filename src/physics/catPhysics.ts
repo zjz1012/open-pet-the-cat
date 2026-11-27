@@ -402,7 +402,11 @@ export class CatPhysics {
 
     const pivotX = 0.56;
     const pivotY = 1.24;
-    const targetAngle = Math.atan2(st.handPos.x - pivotX, pivotY - st.handPos.y) * 0.72;
+    // Hand pivots naturally from bottom edge; Wooden Comb stays aligned upright perpendicular to cat's spine!
+    const targetAngle =
+      st.toolMode === 'comb'
+        ? Math.max(-0.14, Math.min(0.14, st.handVel.y * 0.18))
+        : Math.atan2(st.handPos.x - pivotX, pivotY - st.handPos.y) * 0.72;
     st.handAngle += (targetAngle - st.handAngle) * Math.min(1, clampedDt * 12);
 
     const speedMag = Math.hypot(st.handVel.x, st.handVel.y);
