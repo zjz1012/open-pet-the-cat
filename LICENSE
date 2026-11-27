@@ -22,7 +22,9 @@ SOFTWARE.
 
 ---
 Asset Licensing Notice:
-All image assets in `public/assets/` (`cushion-bg.webp`, `petting-hand.webp`)
-are original assets created for this project and released under CC0 1.0 Universal
-(Public Domain Dedication) so anyone can freely remix, modify, and redistribute
-them in open-source derivatives.
+- Image assets in `public/assets/` (`cushion-bg.webp`, `petting-hand.webp`)
+  are original assets created for this project and released under CC0 1.0 Universal
+  (Public Domain Dedication).
+- Audio asset `public/assets/cat-purr.mp3` is transcoded from the Public Domain
+  domestic cat purring recording "Whiskers' purr edit.ogg" by Adam Cuerden
+  (Wikimedia Commons, Public Domain).
