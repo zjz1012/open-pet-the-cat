@@ -1,0 +1,27 @@
+{
+  "name": "open-pet-the-cat",
+  "version": "1.0.0",
+  "description": "An open-source 2.5D WebGL2 interactive cat petting simulator with real-time fur combing, soft-body indentation physics, and procedural Web Audio purring.",
+  "private": false,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "cat",
+    "pet-the-cat",
+    "webgl2",
+    "glsl",
+    "fur-shader",
+    "web-audio",
+    "interactive-toy",
+    "relaxation"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "vite": "^6.2.0"
+  }
+}

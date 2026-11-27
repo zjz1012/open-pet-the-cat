@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Open Pet the Cat — 开源 WebGL2 真实撸猫模拟器</title>
+    <meta
+      name="description"
+      content="开源 2.5D WebGL2 实时撸猫模拟器：20层体积毛发梳理着色器、指尖压陷软体物理、14种猫咪花色与 Web Audio 呼噜声。"
+    />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='%232e2620' d='M16 14l10 12c4-2 8-2 12 0l10-12c2 8 3 16 1 24-2 10-9 16-17 16s-15-6-17-16c-2-8-1-16 1-24z'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <main id="app" class="app">
+      <section id="viewer" class="viewer" aria-label="撸猫舞台">
+        <div
+          id="stage"
+          class="stage"
+          role="application"
+          tabindex="0"
+          aria-label="抚摸猫咪舞台：滑动或按住抚摸，按空格键自动抚摸，按 T 切换月光模式"
+          aria-keyshortcuts="Space Enter T"
+        >
+          <canvas id="scene" aria-hidden="true"></canvas>
+
+          <button
+            id="theme-toggle"
+            class="stage-fab"
+            type="button"
+            role="switch"
+            aria-checked="false"
+            aria-label="月光模式 (快捷键 T)"
+            title="月光模式 (T)"
+          >
+            <svg class="icon icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M20.2 14.4A8.5 8.5 0 0 1 9.6 3.8a8.5 8.5 0 1 0 10.6 10.6Z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            <svg class="icon icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8" />
+              <path
+                d="M12 2.8v2.2M12 19v2.2M4.8 4.8l1.6 1.6M17.6 17.6l1.6 1.6M2.8 12H5M19 12h2.2M4.8 19.2l1.6-1.6M17.6 6.4l1.6-1.6"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+              />
+            </svg>
+          </button>
+
+          <div id="webgl-fallback" class="fallback" hidden>
+            <p>当前浏览器未启用 WebGL2，无法渲染实时毛发舞台。</p>
+            <button id="retry-btn" type="button">重试初始化</button>
+          </div>
+        </div>
+
+        <div class="dock" aria-label="猫咪与环境控制栏">
+          <div id="breed-list" class="breed-list" role="group" aria-label="选择猫咪花色"></div>
+
+          <div class="controls">
+            <div class="popover-anchor">
+              <button
+                id="proportions-toggle"
+                class="ctrl-btn"
+                type="button"
+                aria-expanded="false"
+                aria-controls="proportions-panel"
+                aria-label="调整猫的体型与胖瘦"
+                title="体型与胖瘦"
+              >
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M4 7h10M18 7h2M4 17h4M12 17h8"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                  />
+                  <circle cx="16" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8" />
+                  <circle cx="10" cy="17" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8" />
+                </svg>
+              </button>
+
+              <div id="proportions-panel" class="popover" role="dialog" aria-label="体型调节" hidden>
+                <div class="slider-row">
+                  <div class="slider-head">
+                    <label for="cat-size">猫的大小</label>
+                    <output id="cat-size-out" for="cat-size">100%</output>
+                  </div>
+                  <input id="cat-size" type="range" min="0" max="10" step="1" value="5" />
+                </div>
+
+                <div class="slider-row">
+                  <div class="slider-head">
+                    <label for="cat-width">躯干胖瘦</label>
+                    <output id="cat-width-out" for="cat-width">100%</output>
+                  </div>
+                  <input id="cat-width" type="range" min="0" max="10" step="1" value="5" />
+                </div>
+
+                <div class="popover-foot">
+                  <button id="reset-proportions" class="text-btn" type="button">恢复默认</button>
+                </div>
+              </div>
+            </div>
+
+            <button
+              id="sound-toggle"
+              class="ctrl-btn"
+              type="button"
+              role="switch"
+              aria-checked="false"
+              aria-label="呼噜声开关"
+              title="呼噜声"
+            >
+              <svg class="icon icon-sound-off" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M11 5.5 6.5 9H3.5v6h3L11 18.5v-13Z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="m16 9.5 4.5 5M20.5 9.5l-4.5 5"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                />
+              </svg>
+              <svg class="icon icon-sound-on" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M11 5.5 6.5 9H3.5v6h3L11 18.5v-13Z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M15.4 8.8a5 5 0 0 1 0 6.4M18.2 6.2a8.6 8.6 0 0 1 0 11.6"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
+
+            <button
+              id="expand-toggle"
+              class="ctrl-btn"
+              type="button"
+              aria-pressed="false"
+              aria-label="切换全屏"
+              title="全屏模式"
+            >
+              <svg class="icon icon-expand" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M4.5 9.5v-5h5M14.5 4.5h5v5M19.5 14.5v5h-5M9.5 19.5h-5v-5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <svg class="icon icon-compress" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M9.5 4.5v5h-5M14.5 9.5v-5M14.5 9.5h5M19.5 14.5h-5v5M4.5 14.5h5v5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <footer class="footer">
+          <span id="breed-caption" class="breed-caption">三花猫 · Calico</span>
+          <span class="sep" aria-hidden="true">·</span>
+          <span class="hint">按住或滑动抚摸 · <kbd>Space</kbd> 自动撸猫 · <kbd>T</kbd> 月光</span>
+        </footer>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
